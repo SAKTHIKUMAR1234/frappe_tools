@@ -75,7 +75,7 @@
  "modified": "2025-12-11 16:55:36.183667",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
- "name": "Data Builder",
+ "name": "Custom Data Builder",
  "naming_rule": "Expression (old style)",
  "owner": "Administrator",
  "permissions": [

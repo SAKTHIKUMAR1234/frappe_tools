@@ -4,7 +4,7 @@
 var filter_group = undefined;
 var onload_set = false;
 
-frappe.ui.form.on("Data Builder", {
+frappe.ui.form.on("Custom Data Builder", {
   refresh(frm) {
     setup_filters(frm);
   },

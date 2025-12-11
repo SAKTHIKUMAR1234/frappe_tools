@@ -5,12 +5,12 @@ import frappe
 from frappe.model.document import Document
 
 
-class DataBuilder(Document):
+class CustomDataBuilder(Document):
 	pass
 
 @frappe.whitelist()
 def get_document_uploaded_values(doc_name):
-    file = frappe.db.get_value("Data Builder", doc_name, 'resouce_document')
+    file = frappe.db.get_value("Custom Data Builder", doc_name, 'resource_document')
     frappe.log(file)
 
 @frappe.whitelist()
