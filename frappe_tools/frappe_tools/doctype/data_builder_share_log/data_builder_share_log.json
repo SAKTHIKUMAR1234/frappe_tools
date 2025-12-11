@@ -1,0 +1,109 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "DB-SL-.#####",
+ "creation": "2025-12-11 16:33:55.655011",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "data_builder",
+  "log_status",
+  "processed_at",
+  "error_log",
+  "user",
+  "share_type",
+  "print_format",
+  "args",
+  "format_data"
+ ],
+ "fields": [
+  {
+   "fieldname": "data_builder",
+   "fieldtype": "Link",
+   "label": "Data Builder",
+   "options": "Data Builder",
+   "read_only": 1
+  },
+  {
+   "fieldname": "log_status",
+   "fieldtype": "Select",
+   "label": "Log Status",
+   "options": "\nPending\nFailed\nSuccess",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processed_at",
+   "fieldtype": "Datetime",
+   "label": "Processed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_log",
+   "fieldtype": "Link",
+   "label": "Error Log",
+   "options": "Error Log",
+   "read_only": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "print_format",
+   "fieldtype": "Link",
+   "label": "Print Format",
+   "options": "Print Format",
+   "read_only": 1
+  },
+  {
+   "fieldname": "format_data",
+   "fieldtype": "Long Text",
+   "label": "Format Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "share_type",
+   "fieldtype": "Select",
+   "label": "Share Type",
+   "options": "\nEmail\nPDF"
+  },
+  {
+   "fieldname": "args",
+   "fieldtype": "Small Text",
+   "label": "Args",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "in_create": 1,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-12-11 16:40:05.247810",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Data Builder Share Log",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
