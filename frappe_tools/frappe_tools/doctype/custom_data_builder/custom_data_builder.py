@@ -270,14 +270,14 @@ def send_email(doc):
 	if not builder.target_field:
 		frappe.throw("Target field (column name) is required.")
 
-	frappe.enqueue(
-		method=process_email_sending,
-		doc=doc,
-		user = frappe.session.user,
-		queue="long",
-		timeout=600
-	)
-	# process_email_sending(doc=doc, user = frappe.session.user)
+	# frappe.enqueue(
+	# 	method=process_email_sending,
+	# 	doc=doc,
+	# 	user = frappe.session.user,
+	# 	queue="long",
+	# 	timeout=600
+	# )
+	process_email_sending(doc=doc, user = frappe.session.user)
 
 
 def get_doctype_rows(builder):
@@ -452,12 +452,14 @@ def process_email_sending(doc, user=None):
 			if builder.add_attachment and builder.print_format:
 				pdf_content = generate_pdf_attachment(builder, row_data)
 				if pdf_content:
-					if document.attachment_naming_field:
-						fname = row_data.get(document.attachment_naming_field, builder.name)
-						attachments.append({
-							"fname": f"{fname}.pdf",
-							"fcontent": pdf_content
-						})
+					if builder.attachment_naming_field:
+						fname = row_data.get(builder.attachment_naming_field, builder.name)
+					else:
+						fname = builder.name
+					attachments.append({
+						"fname": f"{fname}.pdf",
+						"fcontent": pdf_content
+					})
 
 			email_queue = frappe.sendmail(
 				sender=args.get('from_email'),
