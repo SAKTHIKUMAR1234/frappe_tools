@@ -6,28 +6,46 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "doctype_filter_group_html",
-  "apply_filter",
+  "title",
   "resource_document_type",
-  "print_format",
-  "_doctype",
   "resource_document",
   "data_viewer_html",
-  "filter_json"
+  "submitted_user",
+  "sb_email_config",
+  "email_account",
+  "target_field",
+  "global_constants",
+  "cc",
+  "bcc",
+  "subject",
+  "main_body_content",
+  "sb_attachment",
+  "add_attachment",
+  "attachment_naming_field",
+  "print_format",
+  "doctype_filter_group_html",
+  "apply_filter",
+  "_doctype",
+  "filter_json",
+  "amended_from",
+  "letter_head"
  ],
  "fields": [
   {
+   "default": "Excel Upload",
    "fieldname": "resource_document_type",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Resource Document Type",
-   "options": "\nDoctype\nExcel Upload",
+   "options": "Excel Upload",
+   "read_only": 1,
    "reqd": 1
   },
   {
    "depends_on": "eval:doc.resource_document_type=='Doctype'",
    "fieldname": "_doctype",
    "fieldtype": "Link",
+   "hidden": 1,
    "label": "Doctype",
    "mandatory_depends_on": "eval:doc.resource_document_type == 'Doctype'",
    "options": "DocType"
@@ -35,6 +53,7 @@
   {
    "fieldname": "doctype_filter_group_html",
    "fieldtype": "HTML",
+   "hidden": 1,
    "label": "Doctype Filter Group"
   },
   {
@@ -49,16 +68,10 @@
    "label": "Filter Json"
   },
   {
-   "depends_on": "eval:doc.resource_document_type && doc._doctype || doc.resource_document",
-   "fieldname": "print_format",
-   "fieldtype": "Link",
-   "label": "Print Format",
-   "options": "Print Format"
-  },
-  {
    "depends_on": "eval:doc.resource_document_type=='Doctype'",
    "fieldname": "apply_filter",
    "fieldtype": "Button",
+   "hidden": 1,
    "label": "Apply Filter"
   },
   {
@@ -67,12 +80,116 @@
    "fieldtype": "Attach",
    "label": "Resource Document",
    "mandatory_depends_on": "eval:doc.resource_document_type=='Excel Upload'"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Custom Data Builder",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "sb_email_config",
+   "fieldtype": "Section Break",
+   "label": "Email Configuration"
+  },
+  {
+   "fieldname": "email_account",
+   "fieldtype": "Link",
+   "label": "Email Account",
+   "options": "Email Account",
+   "reqd": 1
+  },
+  {
+   "description": "Column name in Excel that contains the recipient email address",
+   "fieldname": "target_field",
+   "fieldtype": "Data",
+   "label": "Target Email Column",
+   "reqd": 1
+  },
+  {
+   "fieldname": "global_constants",
+   "fieldtype": "Table",
+   "label": "Global Constants",
+   "options": "Custom Data Builder Constant"
+  },
+  {
+   "fieldname": "cc",
+   "fieldtype": "Data",
+   "label": "CC"
+  },
+  {
+   "fieldname": "bcc",
+   "fieldtype": "Data",
+   "label": "BCC"
+  },
+  {
+   "fieldname": "subject",
+   "fieldtype": "Data",
+   "label": "Subject",
+   "reqd": 1
+  },
+  {
+   "fieldname": "main_body_content",
+   "fieldtype": "Text Editor",
+   "label": "Email Body",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sb_attachment",
+   "fieldtype": "Section Break",
+   "label": "Attachment"
+  },
+  {
+   "default": "0",
+   "fieldname": "add_attachment",
+   "fieldtype": "Check",
+   "label": "Add PDF Attachment"
+  },
+  {
+   "depends_on": "eval:doc.add_attachment",
+   "fieldname": "print_format",
+   "fieldtype": "Link",
+   "label": "Print Format",
+   "mandatory_depends_on": "eval:doc.add_attachment",
+   "options": "Print Format"
+  },
+  {
+   "depends_on": "eval:doc.add_attachment",
+   "fieldname": "letter_head",
+   "fieldtype": "Link",
+   "label": "Letter Head",
+   "options": "Letter Head"
+  },
+  {
+   "fieldname": "submitted_user",
+   "fieldtype": "Link",
+   "label": "Submitted User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.add_attachment",
+   "fieldname": "attachment_naming_field",
+   "fieldtype": "Data",
+   "label": "Attachment Naming Field"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "is_submittable": 1,
  "links": [],
- "modified": "2025-12-11 16:55:36.183667",
+ "modified": "2025-12-17 11:38:28.586887",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Custom Data Builder",

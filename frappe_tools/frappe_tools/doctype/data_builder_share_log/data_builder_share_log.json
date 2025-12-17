@@ -13,6 +13,7 @@
   "user",
   "share_type",
   "print_format",
+  "email_queue",
   "args",
   "format_data"
  ],
@@ -28,7 +29,7 @@
    "fieldname": "log_status",
    "fieldtype": "Select",
    "label": "Log Status",
-   "options": "\nPending\nFailed\nSuccess",
+   "options": "\nPending\nFailed\nProcessing\nSuccess",
    "read_only": 1
   },
   {
@@ -75,13 +76,21 @@
    "fieldtype": "Small Text",
    "label": "Args",
    "read_only": 1
+  },
+  {
+   "fieldname": "email_queue",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Email Queue",
+   "options": "Email Queue",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "in_create": 1,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-12-11 17:07:40.393113",
+ "modified": "2025-12-15 12:43:21.531067",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Data Builder Share Log",
@@ -99,6 +108,15 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1
   }
  ],
  "row_format": "Dynamic",

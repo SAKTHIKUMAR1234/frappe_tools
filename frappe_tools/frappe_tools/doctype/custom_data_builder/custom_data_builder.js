@@ -6,7 +6,10 @@ var onload_set = false;
 
 frappe.ui.form.on("Custom Data Builder", {
   refresh(frm) {
+    filter_group = undefined;
+    onload_set = false;
     setup_filters(frm);
+    setup_action_btn(frm);
   },
   onload(frm) {
     setup_filters(frm);
@@ -16,7 +19,11 @@ frappe.ui.form.on("Custom Data Builder", {
     _apply_filter(frm);
   },
   validate(frm) {
-    if (frm.doc.resource_document_type == "Doctype" && frm.doc._doctype && filter_group) {
+    if (
+      frm.doc.resource_document_type == "Doctype" &&
+      frm.doc._doctype &&
+      filter_group
+    ) {
       let filters = filter_group.get_filters();
       frm.doc.filter_json = JSON.stringify(filters);
     } else {
@@ -24,6 +31,93 @@ frappe.ui.form.on("Custom Data Builder", {
     }
   },
 });
+
+function setup_action_btn(frm) {
+  if (frm.doc.docstatus == 1) {
+    frm.add_custom_button("Share", () => {
+      show_share_dialog(frm);
+    });
+  }
+
+  if (!frm.is_new() && frm.doc.resource_document) {
+    frm.add_custom_button("Preview", () => {
+      show_preview_dialog(frm);
+    });
+  }
+}
+
+function show_preview_dialog(frm) {
+  frappe.call({
+    method: "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.get_preview_content",
+    args: {
+      doc: frm.doc.name
+    },
+    freeze: true,
+    freeze_message: "Generating Preview...",
+    callback(r) {
+      if (r.message) {
+        let content = r.message;
+        let attachment_html = "";
+        
+        if (content.attachment_url) {
+            attachment_html = `
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #d1d8dd;">
+                    <strong>Attachment:</strong><br>
+                    <a href="${content.attachment_url}" target="_blank" class="btn btn-default btn-sm" style="margin-top:5px;">
+                        Download PDF Preview
+                    </a>
+                </div>
+            `;
+        }
+        
+        let d = new frappe.ui.Dialog({
+          title: 'Preview: ' + content.subject,
+          fields: [
+            {
+              fieldname: 'html_preview',
+              fieldtype: 'HTML',
+              options: `<div style="padding:15px; border:1px solid #d1d8dd; background:#f9fafb; border-radius:4px;">
+                          ${content.html_body}
+                        </div>
+                        ${attachment_html}`
+            }
+          ],
+          primary_action_label: 'Close',
+          primary_action(values) {
+            d.hide();
+          }
+        });
+
+        d.show();
+        d.$wrapper.find('.modal-dialog').css("max-width", "800px");
+      }
+    }
+  });
+}
+
+function show_share_dialog(frm) {
+  frappe.confirm(
+    "Are you sure you want to send emails to all recipients based on the uploaded data?",
+    () => {
+      frappe.call({
+        method:
+          "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.send_email",
+        args: {
+          doc: frm.doc.name,
+        },
+        callback(r) {
+          frappe.show_alert("Email Operations Started");
+        },
+      });
+    }
+  );
+}
+
+function is_valid_email(email) {
+  if (!email) return true;
+  const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return regex.test(email);
+}
 
 function _apply_filter(frm) {
   let filters = filter_group.get_filters();
@@ -33,7 +127,7 @@ function _apply_filter(frm) {
 function fetchDataWithFilters(frm, filters) {
   frappe.call({
     method:
-      "frappe_tools.frappe_tools.doctype.data_builder.data_builder.get_list_details",
+      "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.get_list_details",
     args: {
       doctype: frm.doc._doctype,
       filters: JSON.stringify(filters),
@@ -53,12 +147,12 @@ function fetchDataWithFilters(frm, filters) {
 function getDataWithExcel(frm) {
   frappe.call({
     method:
-      "frappe_tools.frappe_tools.doctype.data_builder.data_builder.get_document_uploaded_values",
+      "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.get_document_uploaded_values",
     args: {
       doc_name: frm.doc.name,
     },
     callback: (r) => {
-      console.log(r);
+      render_preview_table(frm, r.message["data"], r.message["total_count"]);
     },
   });
 }
@@ -92,8 +186,9 @@ function render_preview_table(frm, data, total_count) {
           <thead>
             <tr>
   `;
-
-  Object.keys(data[0]).forEach((key) => {
+  
+  let row_headers = Object.keys(data[0]);
+  row_headers.forEach((key) => {
     html += `<th>${frappe.utils.escape_html(key)}</th>`;
   });
 
@@ -176,28 +271,36 @@ function inject_data_preview_styles() {
 
 function download_excel(docname) {
   window.open(
-    `/api/method/frappe_tools.frappe_tools.doctype.data_builder.data_builder.download_excel?name=${docname}`
+    `/api/method/frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.download_excel?name=${docname}`
   );
 }
 
 function setup_filters(frm) {
+  const _wrapper = frm.fields_dict["data_viewer_html"].$wrapper;
+  _wrapper.empty();
+
+  const wrapper = frm.fields_dict["doctype_filter_group_html"].$wrapper;
+  wrapper.empty();
+
   if (frm.is_new()) {
     return;
   }
   if (onload_set) {
     return;
   }
-
-  const wrapper = frm.fields_dict["doctype_filter_group_html"].$wrapper;
-  wrapper.empty();
+  
   if (
     frm.doc.resource_document_type == "Excel Upload" &&
-    frm.doc.resouce_document
+    frm.doc.resource_document
   ) {
     getDataWithExcel(frm);
   }
 
-  if (frm.doc.resource_document_type == "Doctype" && frm.doc._doctype) {
+  if (
+    frm.doc.resource_document_type == "Doctype" &&
+    frm.doc._doctype &&
+    frm.doc.docstatus == 0
+  ) {
     let filters = [];
     if (frm.doc.filter_json) {
       try {

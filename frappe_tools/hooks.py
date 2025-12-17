@@ -242,3 +242,11 @@ app_license = "mit"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
+scheduler_events = {
+    "cron": {
+        "*/30 * * * *": [
+           "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.poll_update_status_processing_data_share",
+           "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.delete_old_previews"
+        ]
+    }
+}
