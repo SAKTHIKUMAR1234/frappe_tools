@@ -242,6 +242,8 @@ app_license = "mit"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
+app_include_js = ["tools_plugin.bundle.js"]
+
 scheduler_events = {
     "cron": {
         "*/30 * * * *": [

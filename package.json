@@ -1,0 +1,12 @@
+{
+    "name": "frappe_tools",
+    "version": "1.0.0",
+    "description": "Frappe Custom Tools App",
+    "dependencies": {
+      "qrcode": "^1.5.4",
+      "uuid" : "^13.0.0",
+      "pinia" : "^3.0.4",
+      "pinia-plugin-persistedstate" : "^4.7.1"
+    }
+  }
+  
