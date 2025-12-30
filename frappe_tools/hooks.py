@@ -242,13 +242,17 @@ app_license = "mit"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
-app_include_js = ["tools_plugin.bundle.js"]
+ignore_links_on_delete = ['Scanned Document Detail']
+app_include_js = ["tools_plugin.bundle.js", "/assets/frappe_tools/js/global_script.js"]
 
 scheduler_events = {
     "cron": {
         "*/30 * * * *": [
            "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.poll_update_status_processing_data_share",
            "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.delete_old_previews"
+        ],
+        "0 * * * *" : [
+            "frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail.remove_old_deletable_documents"
         ]
     }
 }

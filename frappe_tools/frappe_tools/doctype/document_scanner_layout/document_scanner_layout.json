@@ -1,0 +1,82 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:layout_name",
+ "creation": "2025-12-23 13:06:25.762701",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_01dq",
+  "layout_name",
+  "layout_doctype",
+  "layout_doctype_sections",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_01dq",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Document Scanner Layout",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "layout_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Layout Doctype",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "layout_doctype_sections",
+   "fieldtype": "Table",
+   "label": "Layout Doctype Sections",
+   "options": "Document Scanner Layout Section"
+  },
+  {
+   "fieldname": "layout_name",
+   "fieldtype": "Data",
+   "label": "Layout Name",
+   "reqd": 1,
+   "unique": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-12-23 13:13:21.164105",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Scanner Layout",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -20,8 +20,12 @@ export const useSessionStore = defineStore("session", {
       });
     },
 
-    connect(room) {
-      (this.status = "connected"), (this.mobile_status = "connected");
+    connecting(room) {
+      (this.status = "connecting"), (this.mobile_status = "connecting");
+    },
+
+    connect() {
+      (this.status = "connected"), (this.mobile_status = 'connected')
     },
 
     disconnect() {

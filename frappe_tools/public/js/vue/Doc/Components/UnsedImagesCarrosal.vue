@@ -1,17 +1,9 @@
 <template>
   <div class="image-row">
-    <div
-      v-for="(img, index) in images"
-      :key="index"
-      class="image-wrapper"
-    >
-      <img :src="img" class="image-item" />
-
-      <button
-        class="delete-btn"
-        @click="removeImage(index)"
-        title="Delete image"
-      >
+    <div v-for="(img, index) in images" :key="index" class="image-wrapper">
+      <img :src="img" class="image-item" :draggable="true" @dragstart="onDragStart(index)" @dragover="onDragOver(index)"
+        @dragend="onDrop(index)" />
+      <button class="delete-btn" @click="removeImage(index)" title="Delete image">
         ✕
       </button>
     </div>
@@ -19,6 +11,11 @@
 </template>
 
 <script setup>
+import { ref } from 'vue';
+import { useGloabalDragMemory } from '../../Store/doc_scanner_drag_drop_memory';
+
+const dragMem = useGloabalDragMemory();
+
 const props = defineProps({
   images: {
     type: Array,
@@ -26,7 +23,19 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['remove']);
+function onDragStart(index) {
+  dragMem.dragStart('un_used_section', index, null);
+}
+
+function onDragOver(index) {
+  dragMem.dragHover('un_used_section', index, null);
+}
+
+function onDrop() {
+  dragMem.dragEnd();
+}
+
+const emit = defineEmits(['remove', 'update:images']);
 
 function removeImage(index) {
   emit('remove', index);
@@ -40,8 +49,10 @@ function removeImage(index) {
   gap: 10px;
   overflow-y: auto;
   width: 250px;
-  max-height: 90vh;
+  max-height: 100vh;
   padding: 5px;
+  position: sticky;
+  top: 50px;
 }
 
 .image-row::-webkit-scrollbar {

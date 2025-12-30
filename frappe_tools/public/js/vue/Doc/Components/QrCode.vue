@@ -1,22 +1,49 @@
 <template>
-  <div class="qr-wrapper">
-    <canvas ref="qrCanvas"></canvas>
-  </div>
+    <div class="qr-wrapper">
+        <canvas ref="qrCanvas"></canvas>
+    </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import QRCode from 'qrcode'
-const props = defineProps(['properties']);
+
+const props = defineProps({
+    properties: {
+        type: String,
+        default: '',
+    },
+})
+
 const qrCanvas = ref(null)
-onMounted(() => {
-  QRCode.toCanvas(
-    qrCanvas.value,
-    props.properties,
-    {
-      width: 200,
-      margin: 2
+
+/* ---------------- QR RENDER ---------------- */
+
+function renderQrCode() {
+    if (!qrCanvas.value || !props.properties) return
+
+    QRCode.toCanvas(
+        qrCanvas.value,
+        props.properties,
+        {
+            width: 200,
+            margin: 2,
+        }
+    )
+}
+
+/* ---------------- WATCH ---------------- */
+
+watch(
+    () => props.properties,
+    () => {
+        renderQrCode()
     }
-  )
+)
+
+/* ---------------- MOUNT ---------------- */
+
+onMounted(() => {
+    renderQrCode()
 })
 </script>
