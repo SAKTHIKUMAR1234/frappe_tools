@@ -80,7 +80,7 @@ function fetchScannedDocumentsList() {
 
 function viewDocument(doc) {
     frappe.open_in_new_tab = true;
-    frappe.set_route(`document-scanner/${doc._doctype}/${doc._docname}/${doc.name}`);
+    frappe.set_route(`document-scanner/${encodeURIComponent(doc._doctype)}/${encodeURIComponent(doc._docname)}/${encodeURIComponent(doc.name)}`);
 }
 
 function printScannedDocuments(doc) {

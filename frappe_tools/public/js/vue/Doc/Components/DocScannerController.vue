@@ -1,10 +1,9 @@
 <template>
     <div class="main_container" v-if="dragStore">
-        <UnsedImagesCarrosal class="width : 15%" :images="dragStore.imagesList"
-            @remove="removeImage" @update:images="val => imagesList = val" />
+        <UnsedImagesCarrosal class="width : 15%" :images="dragStore.imagesList" @remove="removeImage"
+            @update:images="val => imagesList = val" />
         <MainLayoutHandler class="width : 85%" :is_new="props.is_new" :document_name="props.document_name"
-            :scan_name="props.scan_name"
-            :doctype="props.doctype" />
+            :scan_name="props.scan_name" :doctype="props.doctype" />
     </div>
 </template>
 
@@ -39,15 +38,32 @@ const imageChunks = new Map()
 
 
 const rtcConfig = {
-    iceServers: [{
-        urls: [
-            'stun:stun.l.google.com:19302',
-            'stun:stun1.l.google.com:19302',
-            'stun:stun2.l.google.com:19302',
-            'stun:stun3.l.google.com:19302',
-            'stun:stun4.l.google.com:19302',
-        ]
-    }]
+    iceServers: [
+        {
+            urls: "stun:stun.relay.metered.ca:80",
+        },
+        {
+            urls: "turn:global.relay.metered.ca:80",
+            username: "270f19d5320690ebbaab3e44",
+            credential: "kU8r69la2oCiqUyV",
+        },
+        {
+            urls: "turn:global.relay.metered.ca:80?transport=tcp",
+            username: "270f19d5320690ebbaab3e44",
+            credential: "kU8r69la2oCiqUyV",
+        },
+        {
+            urls: "turn:global.relay.metered.ca:443",
+            username: "270f19d5320690ebbaab3e44",
+            credential: "kU8r69la2oCiqUyV",
+        },
+        {
+            urls: "turns:global.relay.metered.ca:443?transport=tcp",
+            username: "270f19d5320690ebbaab3e44",
+            credential: "kU8r69la2oCiqUyV",
+        },
+    ],
+
 }
 
 

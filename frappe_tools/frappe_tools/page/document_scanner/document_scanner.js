@@ -8,10 +8,10 @@ frappe.pages['document-scanner'].refresh = function(wrapper) {
 	}
 	var page = new frappe.frappe_tools.doc_scanner.ImageScanner({
 		wrapper,
-		is_new : route[3] == 'new' ? true : false,
-		document_name : route[2],
-		doctype : route[1],
-		scan_name : route[3]
+		is_new : decodeURIComponent(route[3]) == 'new' ? true : false,
+		document_name : decodeURIComponent(route[2]),
+		doctype : decodeURIComponent(route[1]),
+		scan_name : decodeURIComponent(route[3])
 	});
 }
 

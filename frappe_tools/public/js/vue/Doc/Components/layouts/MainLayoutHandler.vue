@@ -172,7 +172,7 @@ async function validateUpdadeScannedDetails() {
         },
         "callback": (r) => {
             if(props.is_new){
-                frappe.set_route(`document-scanner/${props.doctype}/${props.document_name}/${r.message}`)
+                frappe.set_route(`document-scanner/${encodeURIComponent(props.doctype)}/${encodeURIComponent(props.document_name)}/${encodeURIComponent(r.message)}`)
             } else {
                 window.location.reload();
             }
