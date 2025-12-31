@@ -28,6 +28,7 @@ function renderQrCode() {
         {
             width: 200,
             margin: 2,
+            errorCorrectionLevel: 'M'
         }
     )
 }

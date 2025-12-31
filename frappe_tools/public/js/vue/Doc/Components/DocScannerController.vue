@@ -37,33 +37,19 @@ const pendingCandidates = []
 const imageChunks = new Map()
 
 
-const rtcConfig = {
-    iceServers: [
-        {
-            urls: "stun:stun.relay.metered.ca:80",
-        },
-        {
-            urls: "turn:global.relay.metered.ca:80",
-            username: "270f19d5320690ebbaab3e44",
-            credential: "kU8r69la2oCiqUyV",
-        },
-        {
-            urls: "turn:global.relay.metered.ca:80?transport=tcp",
-            username: "270f19d5320690ebbaab3e44",
-            credential: "kU8r69la2oCiqUyV",
-        },
-        {
-            urls: "turn:global.relay.metered.ca:443",
-            username: "270f19d5320690ebbaab3e44",
-            credential: "kU8r69la2oCiqUyV",
-        },
-        {
-            urls: "turns:global.relay.metered.ca:443?transport=tcp",
-            username: "270f19d5320690ebbaab3e44",
-            credential: "kU8r69la2oCiqUyV",
-        },
-    ],
+const iceServers = ref([])
 
+async function fetchIceServers() {
+    return new Promise((resolve, reject) => {
+        frappe.call({
+            method: 'frappe_tools.api.doc_scanner.get_ice_servers',
+            callback: (r) => {
+                iceServers.value = r.message || []
+                resolve(iceServers.value)
+            },
+            error: (err) => reject(err)
+        })
+    })
 }
 
 
@@ -94,7 +80,9 @@ function destroyPeer() {
 function createPeer() {
     destroyPeer()
 
-    pc = new RTCPeerConnection(rtcConfig)
+    pc = new RTCPeerConnection({
+        iceServers: iceServers.value
+    })
 
     dataChannel = pc.createDataChannel('scanner')
 
@@ -255,6 +243,7 @@ watch(
 )
 
 onMounted(async () => {
+    await fetchIceServers()
     createPeer()
     await createOffer()
 })
