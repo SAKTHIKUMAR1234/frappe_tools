@@ -124,8 +124,7 @@ def get_scanned_documents_list(doctype, docname):
 def load_scanned_document_details(docname):
 	document = frappe.get_doc("Scanned Document", docname)
 
-	attachments = frappe.db.sql(
-		f"""
+	query = f"""
 		SELECT 
 			t1.page_no,
 			t1.attachment,
@@ -133,7 +132,7 @@ def load_scanned_document_details(docname):
 			t1.page_type,
 			t1.title,
 			{ 't3.custom_is_s3_uploaded,' if "frappe_s3_integration" in frappe.get_installed_apps() else '' }
-			t3.custom_s3_key,
+			{ 't3.custom_s3_key,' if "frappe_s3_integration" in frappe.get_installed_apps() else '' }
 			t3.name,
 			t3.file_type
 		FROM `tabScanned Document Detail` t1
@@ -144,9 +143,12 @@ def load_scanned_document_details(docname):
 		WHERE t1.is_deleted = 0
 		  AND t2.name = {frappe.db.escape(docname)}
 		ORDER BY t1.page_no ASC
-		""",
+		"""
+	attachments = frappe.db.sql(
+		query,
 		as_dict=True
 	)
+	print(query)
 
 	response = {
 		"doctype": document._doctype,
