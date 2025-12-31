@@ -132,7 +132,7 @@ def load_scanned_document_details(docname):
 			t1.layout_type,
 			t1.page_type,
 			t1.title,
-			t3.custom_is_s3_uploaded,
+			{ 't3.custom_is_s3_uploaded,' if "frappe_s3_integration" in frappe.get_installed_apps() else '' }
 			t3.custom_s3_key,
 			t3.name,
 			t3.file_type
@@ -165,9 +165,9 @@ def load_scanned_document_details(docname):
 		}
 
 		if (
+			"frappe_s3_integration" in frappe.get_installed_apps() and
 			i["custom_is_s3_uploaded"]
 			and i["custom_s3_key"]
-			and "frappe_s3_integration" in frappe.get_installed_apps()
 		):
 			from frappe_s3_integration.s3_core import getS3Connection
 			connection = getS3Connection()
