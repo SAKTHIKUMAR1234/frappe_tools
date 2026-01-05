@@ -16,6 +16,7 @@
    "options": "Document Scanner Settings Items"
   },
   {
+   "allow_bulk_edit": 1,
    "fieldname": "stun_and_turn_servers",
    "fieldtype": "Table",
    "label": "STUN and TURN Servers",
@@ -26,7 +27,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-12-31 12:55:49.449684",
+ "modified": "2026-01-05 17:04:12.093376",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Scanner Settings",
