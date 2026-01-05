@@ -1,10 +1,9 @@
 <template>
     <div class="main_container" v-if="dragStore">
-        <UnsedImagesCarrosal class="width : 15%" :images="dragStore.imagesList"
-            @remove="removeImage" @update:images="val => imagesList = val" />
+        <UnsedImagesCarrosal class="width : 15%" :images="dragStore.imagesList" @remove="removeImage"
+            @update:images="val => imagesList = val" />
         <MainLayoutHandler class="width : 85%" :is_new="props.is_new" :document_name="props.document_name"
-            :scan_name="props.scan_name"
-            :doctype="props.doctype" />
+            :scan_name="props.scan_name" :doctype="props.doctype" />
     </div>
 </template>
 
@@ -38,16 +37,19 @@ const pendingCandidates = []
 const imageChunks = new Map()
 
 
-const rtcConfig = {
-    iceServers: [{
-        urls: [
-            'stun:stun.l.google.com:19302',
-            'stun:stun1.l.google.com:19302',
-            'stun:stun2.l.google.com:19302',
-            'stun:stun3.l.google.com:19302',
-            'stun:stun4.l.google.com:19302',
-        ]
-    }]
+const iceServers = ref([])
+
+async function fetchIceServers() {
+    return new Promise((resolve, reject) => {
+        frappe.call({
+            method: 'frappe_tools.api.doc_scanner.get_ice_servers',
+            callback: (r) => {
+                iceServers.value = r.message || []
+                resolve(iceServers.value)
+            },
+            error: (err) => reject(err)
+        })
+    })
 }
 
 
@@ -78,7 +80,9 @@ function destroyPeer() {
 function createPeer() {
     destroyPeer()
 
-    pc = new RTCPeerConnection(rtcConfig)
+    pc = new RTCPeerConnection({
+        iceServers: iceServers.value
+    })
 
     dataChannel = pc.createDataChannel('scanner')
 
@@ -239,6 +243,7 @@ watch(
 )
 
 onMounted(async () => {
+    await fetchIceServers()
     createPeer()
     await createOffer()
 })

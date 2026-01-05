@@ -43,10 +43,12 @@
                     <button v-if="has_write_permission" class="btn btn-secondary btn-xs" @click="viewDocument(doc)">
                         View
                     </button>
-                    <button v-if="has_print_permission" class="btn btn-primary btn-xs" @click="printScannedDocuments(doc)">
+                    <button v-if="has_print_permission" class="btn btn-primary btn-xs"
+                        @click="printScannedDocuments(doc)">
                         Print
                     </button>
-                    <button v-if="has_delete_permission" class="btn btn-danger btn-xs" @click="deleteScannedDocument(doc)">
+                    <button v-if="has_delete_permission" class="btn btn-danger btn-xs"
+                        @click="deleteScannedDocument(doc)">
                         Delete
                     </button>
                 </div>
@@ -80,7 +82,7 @@ function fetchScannedDocumentsList() {
 
 function viewDocument(doc) {
     frappe.open_in_new_tab = true;
-    frappe.set_route(`document-scanner/${doc._doctype}/${doc._docname}/${doc.name}`);
+    frappe.set_route(`document-scanner/${encodeURIComponent(doc._doctype)}/${encodeURIComponent(doc._docname)}/${encodeURIComponent(doc.name)}`);
 }
 
 function printScannedDocuments(doc) {
@@ -95,7 +97,7 @@ function printScannedDocuments(doc) {
 
 function createNewDocument(doc) {
     frappe.open_in_new_tab = true;
-    frappe.set_route(`document-scanner/${props.doctype}/${props.docname}/new`);
+    frappe.set_route(`document-scanner/${encodeURIComponent(props.doctype)}/${encodeURIComponent(props.docname)}/new`);
 }
 
 function deleteScannedDocument(doc) {
@@ -105,7 +107,7 @@ function deleteScannedDocument(doc) {
             frappe.call({
                 method: 'frappe_tools.api.doc_scanner.delete_scanned_docs',
                 args: {
-                   doc : doc.name
+                    doc: doc.name
                 },
                 callback() {
                     fetchScannedDocumentsList();
@@ -131,7 +133,7 @@ const has_create_permission = computed(() =>
     frappe.perm.has_perm(cur_frm.doc.doctype, 0, 'create', cur_frm.doc.name)
 );
 
-const has_print_permission = computed(()=>{
+const has_print_permission = computed(() => {
     return frappe.perm.has_perm(cur_frm.doc.doctype, 0, 'print', cur_frm.doc.name);
 })
 

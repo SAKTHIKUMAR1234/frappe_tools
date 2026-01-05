@@ -1,146 +1,216 @@
 from frappe_tools.utils import save_file_always_new
 import frappe
-import time
 from six import string_types
 
 import base64
 import io
 import uuid
+import json
 from frappe.utils.file_manager import save_file
 from frappe.utils import sbool
 from PIL import Image
+from frappe import get_site_config
+import redis
 
-local_signal_details = {}
+REDIS_SIGNAL_PREFIX = "doc_scanner_signal"
+
+def get_redis():
+    conf = get_site_config()
+    return redis.Redis.from_url(
+        conf.get("redis_cache", "redis://127.0.0.1:13000"),
+        decode_responses=True
+    )
+def _signal_key(room):
+	return f"{REDIS_SIGNAL_PREFIX}:{room}"
+
+def add_to_signals(room, signal_data):
+
+	r = get_redis()
+	r.rpush(_signal_key(room), json.dumps(signal_data))
+
+
+@frappe.whitelist(allow_guest=True)
+def get_signal(room, timeout=25):
+	
+	r = get_redis()
+
+	result = r.blpop(_signal_key(room), timeout=timeout)
+
+	if not result:
+		return []
+
+	_, data = result
+	return [json.loads(data)]
+
+
+@frappe.whitelist(allow_guest=True)
+def get_ice_servers():
+	settings = frappe.get_single("Document Scanner Settings")
+	ice_servers = []
+	for server in settings.stun_and_turn_servers:
+		config = {
+			"urls": server.url
+		}
+		if server.username:
+			config["username"] = server.username
+		if server.password:
+			config["credential"] = server.password
+		ice_servers.append(config)
+	return ice_servers
 
 @frappe.whitelist(allow_guest=True)
 def ping_to_device(device_type, event, room):
+	frappe.publish_realtime(
+		event=room,
+		message={
+			"device_type": device_type,
+			"event": event
+		}
+	)
 
-	frappe.publish_realtime( event = room, message = {
-		"device_type": device_type,
-		"event": event
-	})
 
 @frappe.whitelist(allow_guest=True)
 def add_scanner(room):
-	ping_to_device('mobile', 'scanner_added', room)
-
-@frappe.whitelist(allow_guest=True)
-def add_signal_to_mobile(room, signal_data):
-	signals = get_signals(room)
-	signals.append(signal_data)
+	ping_to_device("mobile", "scanner_added", room)
 
 
 @frappe.whitelist(allow_guest=True)
 def remove_scanner(room):
-	ping_to_device('mobile', 'scanner_removed', room)
+	ping_to_device("mobile", "scanner_removed", room)
+
 
 @frappe.whitelist(allow_guest=True)
 def send_signal(room, signal_data, device):
-	if device == 'web':
+	"""
+	Bidirectional signaling entry point
+	"""
+	if device == "web":
 		add_to_signals(room, signal_data)
-	elif device == 'mobile':
-		frappe.publish_realtime( event = room, message = {
-			"device_type": "mobile",
-			"event": "signal",
-			"data": signal_data
-		} )
 
-@frappe.whitelist(allow_guest=True)
-def get_signal(room):
-	"""
-	Long polling signal fetcher
-	"""
-	timeout = 25 
-	interval = 0.5     
-	start_time = time.time()
+	elif device == "mobile":
+		frappe.publish_realtime(
+			event=room,
+			message={
+				"device_type": "mobile",
+				"event": "signal",
+				"data": signal_data
+			}
+		)
 
-	while True:
-		signals = get_signals(room)
-
-		if signals:
-			data = signals.copy()
-			clear_signals(room)
-			return data
-		if time.time() - start_time > timeout:
-			return []
-
-		time.sleep(interval)
 
 @frappe.whitelist()
 def get_docscanner_allowed_doctypes():
-	return frappe.get_all("Document Scanner Settings Items", fields = ['doctype_link'], pluck = 'doctype_link')
+	return frappe.get_all(
+		"Document Scanner Settings Items",
+		fields=["doctype_link"],
+		pluck="doctype_link"
+	)
+
 
 @frappe.whitelist()
 def get_scanned_documents_list(doctype, docname):
+	return frappe.get_all(
+		"Scanned Document",
+		filters={
+			"_doctype": doctype,
+			"_docname": docname
+		},
+		order_by="creation desc",
+		fields=["*"]
+	)
 
-	return frappe.get_all("Scanned Document", filters = {
-		"_doctype": doctype,
-		"_docname": docname
-	}, order_by = 'creation desc', fields = ['*'])
 
 @frappe.whitelist()
 def load_scanned_document_details(docname):
-
 	document = frappe.get_doc("Scanned Document", docname)
 
-	attachements = frappe.db.sql(f"""
+	query = f"""
 		SELECT 
 			t1.page_no,
 			t1.attachment,
 			t1.layout_type,
 			t1.page_type,
 			t1.title,
-			t3.custom_is_s3_uploaded,
-			t3.custom_s3_key,
+			{ 't3.custom_is_s3_uploaded,' if "frappe_s3_integration" in frappe.get_installed_apps() else '' }
+			{ 't3.custom_s3_key,' if "frappe_s3_integration" in frappe.get_installed_apps() else '' }
 			t3.name,
 			t3.file_type
-		FROM `tabScanned Document Detail` t1 LEFT JOIN `tabScanned Document` t2 ON t1.scanner_document = t2.name 
-		LEFT JOIN `tabFile` t3 ON t3.file_url = t1.attachment
-		WHERE t1.is_deleted = 0 AND t2.name = {frappe.db.escape(docname)}
+		FROM `tabScanned Document Detail` t1
+		LEFT JOIN `tabScanned Document` t2
+			ON t1.scanner_document = t2.name
+		LEFT JOIN `tabFile` t3
+			ON t3.file_url = t1.attachment
+		WHERE t1.is_deleted = 0
+		  AND t2.name = {frappe.db.escape(docname)}
 		ORDER BY t1.page_no ASC
-	""", as_dict=True)
-	respone = {
-		"doctype" : document._doctype,
-		"docname" : document._docname,
-		"layout" : document.scanner_layout,
-		"attachments" : []
+		"""
+	attachments = frappe.db.sql(
+		query,
+		as_dict=True
+	)
+	print(query)
+
+	response = {
+		"doctype": document._doctype,
+		"docname": document._docname,
+		"layout": document.scanner_layout,
+		"attachments": []
 	}
-	for i in attachements:
+
+	for i in attachments:
 		attach = {
-			"page_no" : i['page_no'],
-			"attachment" : i['attachment'],
-			"page_type" : i['page_type'],
-			"layout_type" : i['layout_type'],
-			"title" : i['title']
+			"page_no": i["page_no"],
+			"attachment": i["attachment"],
+			"page_type": i["page_type"],
+			"layout_type": i["layout_type"],
+			"title": i["title"]
 		}
-		if i['custom_is_s3_uploaded'] and i['custom_s3_key'] and 'frappe_s3_integration' in frappe.get_installed_apps():
+
+		if (
+			"frappe_s3_integration" in frappe.get_installed_apps() and
+			i["custom_is_s3_uploaded"]
+			and i["custom_s3_key"]
+		):
 			from frappe_s3_integration.s3_core import getS3Connection
 			connection = getS3Connection()
-			attach['attachment'] = connection.get_pre_signed_url(i['name'], extra = {
-				"ResponseContentType": f"image/{i['file_type'].lower()}",
-			})
-		respone['attachments'].append(attach)
-	return respone
+			attach["attachment"] = connection.get_pre_signed_url(
+				i["name"],
+				extra={
+					"ResponseContentType": f"image/{i['file_type'].lower()}",
+				},
+			)
+
+		response["attachments"].append(attach)
+
+	return response
 
 
 @frappe.whitelist()
 def upload_image(image_data):
 	if isinstance(image_data, string_types):
 		image_data = frappe.json.loads(image_data)
+
 	doc = frappe.new_doc("Scanned Document Detail")
 	doc.update({
-		"page_no" : image_data['page_no'],
-		"title" : image_data['title'],
-		"page_type" : image_data['page_type'],
-		"layout_type" : image_data['layout_type'],
-		"is_deleted" : 1,
-		"attachment" : None
+		"page_no": image_data["page_no"],
+		"title": image_data["title"],
+		"page_type": image_data["page_type"],
+		"layout_type": image_data["layout_type"],
+		"is_deleted": 1,
+		"attachment": None
 	})
-	doc.save(ignore_permissions = True)
-	if image_data.get('attachment', None):
-		file_name = create_image_upload(image_data['attachment'] , 'Scanned Document Detail', doc.name)
-		doc.db_set('attachment', file_name)
+	doc.save(ignore_permissions=True)
+
+	if image_data.get("attachment"):
+		file_name = create_image_upload(
+			image_data["attachment"],
+			"Scanned Document Detail",
+			doc.name
+		)
+		doc.db_set("attachment", file_name)
+
 	return doc.name
+
 
 def create_image_upload(attach, doctype, docname):
 	if attach.startswith("data:"):
@@ -176,49 +246,53 @@ def create_image_upload(attach, doctype, docname):
 		is_private=1,
 	)
 
-	if 'frappe_s3_integration' in frappe.get_installed_apps() and not frappe.db.get_single_value("AWS S3 Settings", 'disable_s3_operations'):
+	if (
+		"frappe_s3_integration" in frappe.get_installed_apps()
+		and not frappe.db.get_single_value(
+			"AWS S3 Settings",
+			"disable_s3_operations"
+		)
+	):
 		file_doc.db_set("custom_is_s3_uploaded", 1)
+
 	return file_doc.file_url
 
+
 @frappe.whitelist()
-def make_or_update_main_doc(doctype, layout, docname, is_new = False, scan_name = None , documents = []):
+def make_or_update_main_doc(
+	doctype,
+	layout,
+	docname,
+	is_new=False,
+	scan_name=None,
+	documents=[]
+):
 	is_new = sbool(is_new)
-	doc = None
+
 	if is_new or not scan_name:
 		doc = frappe.new_doc("Scanned Document")
 	else:
 		doc = frappe.get_doc("Scanned Document", scan_name)
-	
+
 	doc.update({
-		"_doctype" : doctype,
-		"_docname" : docname,
-		"scanner_layout" : layout
+		"_doctype": doctype,
+		"_docname": docname,
+		"scanner_layout": layout
 	})
+
 	if isinstance(documents, string_types):
 		documents = frappe.json.loads(documents)
+
 	doc.flags.documents = documents
-	doc.save(ignore_permissions = True)
+	doc.save(ignore_permissions=True)
 	doc.set_prev_documents_delete()
 	doc.set_new_document_names()
+
 	return doc.name
+
 
 @frappe.whitelist()
 def delete_scanned_docs(doc):
-	frappe.get_doc("Scanned Document", doc).delete(ignore_permissions = True)
-
-def add_to_signals(room, signal_data):
-	global local_signal_details
-	if room not in local_signal_details:
-		local_signal_details[room] = []
-	local_signal_details[room].append(signal_data)
-
-def get_signals(room):
-	global local_signal_details
-	if room not in local_signal_details:
-		local_signal_details[room] = []
-	return local_signal_details[room]
-
-def clear_signals(room):
-	global local_signal_details
-	if room in local_signal_details:
-		local_signal_details[room] = []
+	frappe.get_doc("Scanned Document", doc).delete(
+		ignore_permissions=True
+	)

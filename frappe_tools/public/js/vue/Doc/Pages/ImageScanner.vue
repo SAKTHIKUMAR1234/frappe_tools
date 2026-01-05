@@ -1,7 +1,7 @@
 <template>
     <div class="container h-100 mt-2 d-flex flex-column">
 
-        <div class="d-flex justify-content-end p-10" >
+        <div class="d-flex justify-content-end p-10">
             <SessionIndicator />
         </div>
 
@@ -68,17 +68,29 @@ const sessionStore = useSessionStore()
 
 const controllerRef = ref(null)
 const room = ref(null)
+const iceServers = ref([])
 let realtimeHandler = null
+
+async function fetchIceServers() {
+    frappe.call({
+        method: 'frappe_tools.api.doc_scanner.get_ice_servers',
+        callback: (r) => {
+            iceServers.value = r.message || []
+        }
+    })
+}
 
 
 const qrProperties = computed(() => {
     if (!room.value) return ''
 
+    // Minimal data to keep QR code scannable. 
+    // Mobile app should fetch ice_servers using the server_url.
     return JSON.stringify({
-        room: room.value,
-        device_type: 'web',
-        server_url: window.location.origin,
-        site_name: frappe.boot.site_name,
+        r: room.value,             // room
+        dt: 'web',                 // device_type
+        u: window.location.origin, // server_url
+        s: frappe.boot.site_name,  // site_name
     })
 })
 
@@ -128,6 +140,7 @@ function createNewSession() {
 }
 
 onMounted(() => {
+    fetchIceServers()
     createNewSession()
 })
 

@@ -5,7 +5,8 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "applicable_doctypes"
+  "applicable_doctypes",
+  "stun_and_turn_servers"
  ],
  "fields": [
   {
@@ -13,13 +14,20 @@
    "fieldtype": "Table",
    "label": "Applicable Doctypes",
    "options": "Document Scanner Settings Items"
+  },
+  {
+   "allow_bulk_edit": 1,
+   "fieldname": "stun_and_turn_servers",
+   "fieldtype": "Table",
+   "label": "STUN and TURN Servers",
+   "options": "Document Scanner Server Setting"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-12-23 14:42:55.982120",
+ "modified": "2026-01-05 17:04:12.093376",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Scanner Settings",

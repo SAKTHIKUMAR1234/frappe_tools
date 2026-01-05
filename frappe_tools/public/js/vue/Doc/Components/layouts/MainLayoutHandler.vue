@@ -159,6 +159,21 @@ async function uploadImagesWithConcurrency(sections, layout, concurrency = 2) {
 async function validateUpdadeScannedDetails() {
     let dataToSend = dragMem.document_scanner_details.sections;
     let layout = dragMem.document_scanner_details.layout;
+
+    // Validation: Check if there's at least one image
+    let hasImages = false;
+    for (const section of Object.values(dataToSend)) {
+        if (section.images && section.images.some(img => img.attachment)) {
+            hasImages = true;
+            break;
+        }
+    }
+
+    if (!hasImages) {
+        frappe.msgprint(__('Please add at least one image to create/update the document.'));
+        return;
+    }
+
     let attachmentNames = await uploadImagesWithConcurrency(dataToSend, layout, 5);
     frappe.call({
         "method": "frappe_tools.api.doc_scanner.make_or_update_main_doc",
@@ -168,17 +183,17 @@ async function validateUpdadeScannedDetails() {
             "docname": props.document_name,
             "is_new": props.is_new,
             "documents": JSON.stringify(attachmentNames),
-            "scan_name" : props.scan_name
+            "scan_name": props.scan_name
         },
         "callback": (r) => {
-            if(props.is_new){
-                frappe.set_route(`document-scanner/${props.doctype}/${props.document_name}/${r.message}`)
+            if (props.is_new) {
+                frappe.set_route(`document-scanner/${encodeURIComponent(props.doctype)}/${encodeURIComponent(props.document_name)}/${encodeURIComponent(r.message)}`)
             } else {
                 window.location.reload();
             }
         },
-        freeze : true,
-        freeze_msg : "Please Wait While Processing"
+        freeze: true,
+        freeze_msg: "Please Wait While Processing"
     })
 }
 
@@ -202,7 +217,7 @@ function createLinkComponent() {
                 return {
                     filters: {
                         layout_doctype: props.doctype,
-                        docstatus : 1
+                        docstatus: 1
                     }
                 };
             }
