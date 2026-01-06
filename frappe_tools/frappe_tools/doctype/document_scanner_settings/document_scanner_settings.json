@@ -27,7 +27,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-01-05 17:04:12.093376",
+ "modified": "2026-01-06 10:15:06.132980",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Scanner Settings",
@@ -42,6 +42,13 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "All",
+   "share": 1
   }
  ],
  "row_format": "Dynamic",
