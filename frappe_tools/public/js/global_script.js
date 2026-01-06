@@ -1,53 +1,66 @@
-$(window).on("page-change", page_changed);
+(function () {
+  window.doc_scanner_allowed_doctypes = [];
+  let allowed_loaded = false;
 
-var doc_scanner_allowed_doctypes = [];
-var is_first_load = true;
+  $(document).ready(function () {
+    if (allowed_loaded) return;
+    allowed_loaded = true;
 
-function page_changed(event) {
-  frappe.after_ajax(async function () {
-    var route = await frappe.get_route();
-    if (route[0] == "Form") {
-      if (doc_scanner_allowed_doctypes.length === 0 && is_first_load) {
-        is_first_load = false;
-        frappe.call({
-          method:
-            "frappe_tools.api.doc_scanner.get_docscanner_allowed_doctypes",
-          callback: function (r) {
-            doc_scanner_allowed_doctypes = r.message;
-            execute_form_script(route);
-          },
-        });
-      } else {
-        execute_form_script(route);
-      }
-    }
+    frappe.call({
+      method: "frappe_tools.api.doc_scanner.get_docscanner_allowed_doctypes",
+      callback(r) {
+        window.doc_scanner_allowed_doctypes = r.message || [];
+        tryApply();
+      },
+    });
   });
-}
 
-function execute_form_script(route) {
-  if (doc_scanner_allowed_doctypes.includes(route[1])) {
-    cur_frm.add_custom_button(__("View Scanned Documents"), function () {
-      let d = new frappe.ui.Dialog({
-        title: "Scanned Documents",
+  frappe.router.on("change", () => {
+    tryApply();
+  });
+
+  function tryApply(retries = 12) {
+    if (!window.cur_frm || !cur_frm.doctype || !cur_frm.doc) {
+      if (retries <= 0) return;
+      return setTimeout(() => tryApply(retries - 1), 200);
+    }
+
+    if (!window.doc_scanner_allowed_doctypes.length) {
+      if (retries <= 0) return;
+      return setTimeout(() => tryApply(retries - 1), 200);
+    }
+
+    maybeAddDocScannerButton(cur_frm);
+  }
+
+  function maybeAddDocScannerButton(frm) {
+    if (!window.doc_scanner_allowed_doctypes.includes(frm.doctype)) {
+      return;
+    }
+    setTimeout(() => {
+      addDocScannerButton(frm);
+    }, 1000);
+  }
+
+  function addDocScannerButton(frm) {
+    frm.add_custom_button(__("View Scanned Documents"), () => {
+      const d = new frappe.ui.Dialog({
+        title: __("Scanned Documents"),
         size: "large",
-        fields: [
-          {
-            fieldtype: "HTML",
-            fieldname: "scanned_docs_html",
-          },
-        ],
-        primary_action_label: "Close",
-        primary_action: function () {
+        fields: [{ fieldtype: "HTML", fieldname: "scanned_docs_html" }],
+        primary_action_label: __("Close"),
+        primary_action() {
           d.hide();
         },
       });
+
       d.show();
-      $(d.fields_dict["scanned_docs_html"]).html("");
-      d.scanned_docs_html = new frappe.frappe_tools.doc_scanner.DocumentListViewer({
-        wrapper: d.fields_dict["scanned_docs_html"].wrapper,
-        doctype: cur_frm.doc.doctype,
-        docname: cur_frm.doc.name,
+
+      new frappe.frappe_tools.doc_scanner.DocumentListViewer({
+        wrapper: d.fields_dict.scanned_docs_html.wrapper,
+        doctype: frm.doctype,
+        docname: frm.doc.name,
       });
     });
   }
-}
+})();
