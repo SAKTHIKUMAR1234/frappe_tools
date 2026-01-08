@@ -262,3 +262,10 @@ scheduler_events = {
         ]
     }
 }
+
+fixtures =[
+        {
+            'dt' : 'Role',
+            'filters' : [['name', 'in', ['Scanner User']]]
+        }
+    ]
