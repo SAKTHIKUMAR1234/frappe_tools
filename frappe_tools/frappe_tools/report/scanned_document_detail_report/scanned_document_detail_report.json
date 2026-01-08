@@ -10,7 +10,7 @@
  "idx": 0,
  "is_standard": "Yes",
  "letter_head": null,
- "modified": "2026-01-05 18:13:59.570345",
+ "modified": "2026-01-08 15:26:51.569618",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Scanned Document Detail Report",
@@ -19,6 +19,13 @@
  "ref_doctype": "Scanned Document",
  "report_name": "Scanned Document Detail Report",
  "report_type": "Script Report",
- "roles": [],
+ "roles": [
+  {
+   "role": "Scanner User"
+  },
+  {
+   "role": "System Manager"
+  }
+ ],
  "timeout": 0
 }
