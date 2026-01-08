@@ -148,7 +148,6 @@ def load_scanned_document_details(docname):
 		query,
 		as_dict=True
 	)
-	print(query)
 
 	response = {
 		"doctype": document._doctype,
