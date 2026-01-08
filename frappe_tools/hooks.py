@@ -243,7 +243,7 @@ app_license = "mit"
 # }
 
 ignore_links_on_delete = ['Scanned Document Detail']
-app_include_js = ["tools_plugin.bundle.js", "/assets/frappe_tools/js/global_script.js"]
+app_include_js = ["tools_plugin.bundle.js"]
 
 doc_events = {
 	"*": {
