@@ -31,8 +31,8 @@ def execute(filters=None):
 
     query_filters = {"docstatus": ["<", 2]}
 
-    from_date = filters.get("from_date")
-    to_date = filters.get("to_date")
+    from_date = filters.get("start_date")
+    to_date = filters.get("end_date")
     date_field = 'creation'
 
     if from_date and to_date:
