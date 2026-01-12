@@ -27,18 +27,37 @@ frappe.query_reports["Document Upload Status Report"] = {
       options: "",
     },
     {
-      fieldname : "start_date",
-      label : __("Document Start Date(creation)"),
-      fieldtype : "Date",
-      reqd : 1,
-      default : frappe.datetime.add_days(frappe.datetime.get_today(), -30),
+      fieldname: "start_date",
+      label: __("Document Start Date(creation)"),
+      fieldtype: "Date",
+      reqd: 1,
+      default: frappe.datetime.add_days(frappe.datetime.get_today(), -30),
     },
     {
-      fieldname : "end_date",
-      label : __("Document End Date(creation)"),
-      fieldtype : "Date",
-      reqd : 1,
-      default : frappe.datetime.add_days(frappe.datetime.get_today()),
-    }
+      fieldname: "end_date",
+      label: __("Document End Date(creation)"),
+      fieldtype: "Date",
+      reqd: 1,
+      default: frappe.datetime.add_days(frappe.datetime.get_today()),
+    },
   ],
+
+  formatter: function (value, row, column, data, default_formatter) {
+    value = default_formatter(value, row, column, data);
+    if (column.fieldname === "is_scanned") {
+      if (value) {
+        return `
+          <span class="indicator green">
+            Scanned
+          </span>
+        `;
+      }
+      return `
+        <span class="indicator red">
+          Not Scanned
+        </span>
+      `;
+    }
+    return value;
+  },
 };

@@ -15,18 +15,19 @@ def get_data(filters = {}):
 		frappe.throw("Please Setup Filters")
 
 	data = frappe.db.sql(f"""
-		SELECT 
-			   t1._doctype as document_type, t1._docname as docname,
-			   t1.scanner_layout as layout,
-			   COUNT(t2.name) as page_count,
-			   t2.title,
-			   t3.docstatus, t1.name as scan_name, t1.owner as created_by, t1.creation, t1.modified
+		SELECT
+			t1._doctype as document_type, t1._docname as docname,
+			t1.scanner_layout as layout,
+			COUNT(t2.name) as page_count,
+			t2.title,
+			t3.docstatus, t1.name as scan_name, t1.owner as created_by, t1.creation, t1.modified
 		FROM `tabScanned Document` t1
 		JOIN `tabScanned Document Detail` t2 ON t1.name = t2.scanner_document
 		JOIN `tab{filters.get('document_type')}` t3 ON t3.name = t1._docname
 		WHERE t2.is_deleted != 1 
 		AND t3.creation BETWEEN {frappe.db.escape(filters.get('start_date'))} AND  {frappe.db.escape(filters.get('end_date'))}
 		GROUP BY t2.title , t1.name, t1._docname, t1._doctype
+		ORDER BY t3.creation DESC
 	""", as_dict=True)
 	
 	return data

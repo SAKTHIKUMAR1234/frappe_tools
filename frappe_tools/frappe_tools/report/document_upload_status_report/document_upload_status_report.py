@@ -23,10 +23,10 @@ def execute(filters=None):
         })
 
     columns.append({
-        "label": "Scanned",
+        "label": "Scan Status",
         "fieldname": "is_scanned",
-        "fieldtype": "Check",
-        "width": 90,
+        "fieldtype": "Data",
+        "width": 200,
     })
 
     query_filters = {"docstatus": ["<", 2]}
