@@ -1,164 +1,110 @@
-<style>
-/* --- A4 Paper Setup --- */
-@page {
-    size: A4;
-    margin: 5mm; /* Tightened margins */
-}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
 
-html, body {
-    margin: 0;
-    padding: 0;
-    background: #fff;
-    font-family: -apple-system, sans-serif;
-    -webkit-print-color-adjust: exact;
-}
+    <style>
+        @page {
+            size: A4;
+            margin: 8mm;
+        }
 
-/* THE FIX: This container wraps everything to prevent splitting headers from images */
-.printable-page {
-    page-break-inside: avoid;
-    page-break-after: always;
-    width: 100%;
-    display: block;
-    box-sizing: border-box;
-    padding: 5mm;
-}
+        html, body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: #fff;
+        }
 
-/* --- Compact Section Styling --- */
-.section-title {
-    font-size: 14pt;
-    font-weight: bold;
-    margin: 0;
-    padding: 2mm 0;
-    border-bottom: 1.5px solid #333;
-    text-transform: uppercase;
-}
+        .printable-page {
+            page-break-after: always;
+            width: 100%;
+            box-sizing: border-box;
+        }
 
-.page-header {
-    font-size: 9pt;
-    color: #666;
-    margin: 2mm 0;
-}
+        .header {
+            margin-bottom: 6mm;
+        }
 
-/* --- Layout Grids --- */
-.grid-vertical {
-    display: grid;
-    grid-template-rows: 1fr 1fr;
-    grid-gap: 5mm;
-    height: 250mm; /* Maximum allowed to stay on one page */
-}
+        .section-title {
+            font-size: 12pt;
+            font-weight: bold;
+            border-bottom: 1px solid #333;
+            margin-bottom: 2mm;
+        }
 
-.grid-horizontal {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-gap: 5mm;
-    height: 120mm; /* Compact horizontal view */
-}
+        .page-meta {
+            font-size: 9pt;
+            color: #555;
+        }
 
-/* --- Image Boxes --- */
-.image-box {
-    position: relative;
-    border: 1px solid #ccc;
-    background: #fafafa;
-    padding: 5px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-    height: 100%;
-    box-sizing: border-box;
-}
+        .image-box {
+            width: 100%;
+            height: 240mm;
+            border: 1px solid #ccc;
+            overflow: hidden;
+            text-align: center;
+        }
 
-.image-box img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
+        .image-box img {
+            max-width: 100%;
+            max-height: 100%;
+            display: block;
+            margin: auto;
+        }
 
-/* Compact Labels */
-.image-label {
-    position: absolute;
-    top: 0;
-    left: 0;
-    padding: 2px 6px;
-    font-size: 8pt;
-    font-weight: bold;
-    color: #fff !important;
-    z-index: 5;
-}
+        .placeholder {
+            width: 100%;
+            height: 100%;
+            border: 1px dashed #ddd;
+        }
+    </style>
+</head>
 
-.image-label.front { background-color: #28a745 !important; }
-.image-label.back { background-color: #e67e22 !important; }
+<body>
 
-.placeholder {
-    width: 100%;
-    height: 100%;
-    border: 1px dashed #ddd;
-    background: #fdfdfd;
-}
-</style>
+{% for section_name, section in data.sections.items() %}
 
-<div class="print-format-container">
-    {% for section_name, section in data.sections.items() %}
-    
-    {# --- FRONT AND BACK VERTICAL --- #}
-    {% if section.section_type == "Front And Back Vertical" %}
-        {% for page_no, page_images in section.images | sort(attribute="page_no") | groupby("page_no") %}
-        <div class="printable-page">
-            <div class="section-title">{{ section_name }}</div>
-            <div class="page-header">Page {{ page_no }}</div>
-            <div class="grid-vertical">
-                {% for img in page_images | sort(attribute="page_type", reverse=True) %}
-                <div class="image-box">
-                    <div class="image-label {{ img.page_type|lower }}">{{ img.page_type }}</div>
-                    {% if img.attachment %}<img src="{{ img.attachment }}">{% else %}<div class="placeholder"></div>{% endif %}
+    {# Group images by logical page_no #}
+    {% for page_no, images in section.images | groupby("page_no") %}
+
+        {# Determine if both front & back exist #}
+        {% set page_types = images | map(attribute="page_type") | list %}
+        {% set show_page_type = page_types | length > 1 %}
+
+        {# Explicit Front → Back order #}
+        {% for desired_type in ["Front", "Back"] %}
+            {% for img in images %}
+                {% if img.page_type == desired_type %}
+
+                <div class="printable-page">
+
+                    <div class="header">
+                        <div class="section-title">{{ section_name }}</div>
+                        <div class="page-meta">
+                            Page {{ page_no }}
+                            {% if show_page_type %}
+                                — {{ img.page_type }}
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="image-box">
+                        {% if img.attachment %}
+                            <img src="{{ img.attachment }}">
+                        {% else %}
+                            <div class="placeholder"></div>
+                        {% endif %}
+                    </div>
+
                 </div>
-                {% endfor %}
-            </div>
-        </div>
-        {% endfor %}
 
-    {# --- FRONT AND BACK HORIZONTAL --- #}
-    {% elif section.section_type == "Front And Back Horizontal" %}
-        {% for page_no, page_images in section.images | sort(attribute="page_no") | groupby("page_no") %}
-        <div class="printable-page">
-            <div class="section-title">{{ section_name }}</div>
-            <div class="page-header">Page {{ page_no }}</div>
-            <div class="grid-horizontal">
-                {% for img in page_images | sort(attribute="page_type", reverse=True) %}
-                <div class="image-box">
-                    <div class="image-label {{ img.page_type|lower }}">{{ img.page_type }}</div>
-                    {% if img.attachment %}<img src="{{ img.attachment }}">{% else %}<div class="placeholder"></div>{% endif %}
-                </div>
-                {% endfor %}
-            </div>
-        </div>
+                {% endif %}
+            {% endfor %}
         {% endfor %}
-
-    {# --- SERIES VERTICAL --- #}
-    {% elif section.section_type == "Series Vertical" %}
-        {% for img in section.images | sort(attribute="page_no") %}
-        <div class="printable-page">
-            <div class="section-title">{{ section_name }}</div>
-            <div class="page-header">Page {{ img.page_no }}</div>
-            <div class="image-box" style="height: 250mm;">
-                {% if img.attachment %}<img src="{{ img.attachment }}">{% else %}<div class="placeholder"></div>{% endif %}
-            </div>
-        </div>
-        {% endfor %}
-
-    {# --- SINGLE PAGE --- #}
-    {% elif section.section_type == "Single Page" %}
-        {% if section.images and section.images|length > 0 %}
-        <div class="printable-page">
-            <div class="section-title">{{ section_name }}</div>
-            <div class="page-header">Page {{ section.images[0].page_no }}</div>
-            <div class="image-box" style="height: 250mm;">
-                <img src="{{ section.images[0].attachment }}">
-            </div>
-        </div>
-        {% endif %}
-    {% endif %}
 
     {% endfor %}
-</div>
+{% endfor %}
+
+</body>
+</html>

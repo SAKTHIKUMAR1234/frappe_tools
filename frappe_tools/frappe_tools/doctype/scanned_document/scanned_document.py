@@ -1,9 +1,12 @@
 # Copyright (c) 2025, sakthi123msd@gmail.com and contributors
 # For license information, please see license.txt
 
+import base64
+import io
+from PIL import Image
+import requests
 import frappe
 from frappe.model.document import Document
-from frappe.www.printview import get_print_style
 from frappe.utils.pdf import get_pdf
 
 class ScannedDocument(Document):
@@ -57,23 +60,47 @@ def get_print_html(doc):
 	return html
 
 @frappe.whitelist()
-def get_scan_pdf(doc):
-	html = get_print_html(doc)
+def get_scan_pdf(name):
+	html = get_print_html(name)
+
 	pdf = get_pdf(
 		html,
 		options={
-			"print-media-type": None,
-			"disable-smart-shrinking": "",
-			"margin-top": "8mm",
-			"margin-bottom": "8mm",
-			"margin-left": "8mm",
-			"margin-right": "8mm",
+			 "page-size": "A4",
+	"dpi": 96,
+	"image-quality": 55,
+	"disable-smart-shrinking": "",
+	"print-media-type": "",
 		}
 	)
-	filename = f"Document_Scan_{doc}.pdf"
-	frappe.local.response.filename = filename
+
+	frappe.local.response.filename = f"Document_Scan_{name}.pdf"
 	frappe.local.response.filecontent = pdf
 	frappe.local.response.type = "download"
+
+def compress_external_image(url, max_width_px=1080, quality=80):
+	"""
+	max_width_px ≈ A4 width @ ~200 DPI
+	"""
+	print("SSS")
+	resp = requests.get(url, timeout=10)
+	resp.raise_for_status()
+
+	img = Image.open(io.BytesIO(resp.content))
+
+	if img.mode in ("RGBA", "P"):
+		img = img.convert("RGB")
+
+	w, h = img.size
+	if w > max_width_px:
+		ratio = max_width_px / float(w)
+		img = img.resize((max_width_px, int(h * ratio)), Image.LANCZOS)
+
+	buf = io.BytesIO()
+	img.save(buf, format="JPEG", optimize=True, quality=quality)
+
+	encoded = base64.b64encode(buf.getvalue()).decode()
+	return f"data:image/jpeg;base64,{encoded}"
 
 @frappe.whitelist()
 def get_section_details(layout, doc_details):
@@ -84,10 +111,11 @@ def get_section_details(layout, doc_details):
 			"images" : [] 
 		}
 	for i in doc_details['attachments']:
+		if i['attachment'] :
+			i['attachment'] = compress_external_image(i['attachment'])
 		resp[i.get('title')]['images'].append({
 			"page_no" : i['page_no'],
 			"attachment" : i['attachment'],
 			"page_type" : i['page_type'],
-		})
-	
+		})	
 	return resp

@@ -9,12 +9,10 @@
 
         </div>
 
-        <!-- Empty State -->
         <div v-if="!documentsList.length" class="empty-state">
             <p>No scanned documents found.</p>
         </div>
 
-        <!-- Documents List -->
         <div v-else class="documents-grid">
             <div v-for="doc in documentsList" :key="doc.name" class="document-card">
                 <div class="doc-header">
@@ -45,7 +43,7 @@
                     </button>
                     <button v-if="has_print_permission" class="btn btn-primary btn-xs"
                         @click="printScannedDocuments(doc)">
-                        Print
+                        PDF
                     </button>
                     <button v-if="has_delete_permission" class="btn btn-danger btn-xs"
                         @click="deleteScannedDocument(doc)">
@@ -86,10 +84,8 @@ function viewDocument(doc) {
 }
 
 function printScannedDocuments(doc) {
-    const doctype = "Scanned Document";
-    const url = `/tprint?doctype=${encodeURIComponent(doctype)}`
-        + `&name=${encodeURIComponent(doc.name)}`
-        + `&settings={"margin_top":10,"margin_bottom":10}`;
+    const url = `/api/method/frappe_tools.frappe_tools.doctype.scanned_document.scanned_document.get_scan_pdf?`
+        + `&name=${encodeURIComponent(doc.name)}`;
 
     window.open(url, "_blank");
 }
