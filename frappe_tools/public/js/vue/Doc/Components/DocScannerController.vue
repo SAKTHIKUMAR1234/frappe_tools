@@ -1,8 +1,8 @@
 <template>
     <div class="main_container" v-if="dragStore">
-        <UnsedImagesCarrosal class="width : 15%" :images="dragStore.imagesList" @remove="removeImage"
+        <UnsedImagesCarrosal style="width : 60%" :images="dragStore.imagesList" @remove="removeImage"
             @update:images="val => imagesList = val" />
-        <MainLayoutHandler class="width : 85%" :is_new="props.is_new" :document_name="props.document_name"
+        <MainLayoutHandler style="width : 40%" :is_new="props.is_new" :document_name="props.document_name"
             :scan_name="props.scan_name" :doctype="props.doctype" />
     </div>
 </template>
