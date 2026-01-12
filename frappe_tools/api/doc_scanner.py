@@ -7,7 +7,7 @@ import io
 import uuid
 import json
 from frappe.utils.file_manager import save_file
-from frappe.utils import sbool
+from frappe.utils import cint, sbool
 from PIL import Image
 from frappe import get_site_config
 import redis
@@ -231,6 +231,12 @@ def create_image_upload(attach, doctype, docname):
 		save_format = img.format or ext.upper()
 		img.save(output, format=save_format)
 		content = output.getvalue()
+		if "frappe_s3_integration" in frappe.get_installed_apps():
+			setting = frappe.get_single("File Image Settings")
+			if not setting.get("optimize_images_in_s3"):
+				return
+			from frappe_s3_integration.frappe_s3_integration.image_optimization.optimization_scheduler import optimize_image
+			content = optimize_image(content=content, content_type=mime, optimize=True, quality=cint(setting.get("image_optimization_quantity")))
 	except Exception:
 		frappe.throw("Invalid or unsupported image format")
 
