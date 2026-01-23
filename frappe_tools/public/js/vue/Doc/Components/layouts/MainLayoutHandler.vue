@@ -4,6 +4,9 @@
             <button class="btn btn-primary btn-sm" @click.prevent="validateUpdadeScannedDetails">
                 {{ props.is_new ? 'Create' : 'Update' }}
             </button>
+            <button v-if="!props.is_new" class="btn btn-default btn-sm" @click.prevent="emit('newScan')">
+                Create
+            </button>
         </div>
         <div ref="layout_select_ref" class="layout_select_ref">
         </div>
@@ -47,19 +50,33 @@ const props = defineProps({
     }
 })
 
+const emit = defineEmits(['newScan', 'created']);
+
+const dragMem = useGloabalDragMemory();
+const root = ref(null);
+const currScannerDetails = ref(null);
+const layout_select = ref(null);
+const localScanName = ref(props.scan_name);
+
+watch(() => props.is_new, (val) => {
+    if (val) {
+        localScanName.value = null;
+        if (layout_select.value) {
+            layout_select.value.set_value('');
+        }
+    }
+}, { immediate: true });
+
+watch(() => props.scan_name, (val) => {
+    localScanName.value = val;
+});
+
 const LayoutMapper = {
     "Front And Back Vertical": FrontBackVertical,
     "Front And Back Horizontal": FrontBackHorizontal,
     "Single Page": SinglePage,
     "Series Vertical": SeriesVertical
 };
-
-const dragMem = useGloabalDragMemory();
-
-const root = ref(null);
-
-const currScannerDetails = ref(null);
-const layout_select = ref(null);
 
 async function addToPages(value, pages) {
     let reference = JSON.parse(JSON.stringify(dragMem.document_scanner_details));
@@ -186,10 +203,15 @@ async function validateUpdadeScannedDetails() {
             "scan_name": props.scan_name
         },
         "callback": (r) => {
+            localScanName.value = r.message;
             if (props.is_new) {
-                frappe.set_route(`document-scanner/${encodeURIComponent(props.doctype)}/${encodeURIComponent(props.document_name)}/${encodeURIComponent(r.message)}`)
+                frappe.show_alert({ message: __('Document Created Successfully'), indicator: 'green' });
+                // Update URL without reload to preserve WebRTC
+                const newPath = `document-scanner/${encodeURIComponent(props.doctype)}/${encodeURIComponent(props.document_name)}/${encodeURIComponent(r.message)}`;
+                window.history.replaceState(null, '', `/app/${newPath}`);
+                emit('created');
             } else {
-                window.location.reload();
+                frappe.show_alert({ message: __('Document Updated Successfully'), indicator: 'green' });
             }
         },
         freeze: true,
@@ -222,7 +244,7 @@ function createLinkComponent() {
                 };
             }
         },
-        doc: this.sample_doc,
+        doc: {},
         render_input: true,
     });
     if (!props.is_new) {
@@ -290,7 +312,7 @@ async function fetchAndSetScanDetails() {
     frappe.call({
         "method": "frappe_tools.api.doc_scanner.load_scanned_document_details",
         "args": {
-            "docname": props.scan_name
+            "docname": localScanName.value
         },
         "callback": (r) => {
             currScannerDetails.value = r.message;
@@ -303,7 +325,7 @@ async function fetchAndSetScanDetails() {
 
 onMounted(async () => {
     createLinkComponent();
-    if (!props.is_new && props.scan_name) {
+    if (localScanName.value && localScanName.value !== 'new') {
         await fetchAndSetScanDetails();
     }
 });

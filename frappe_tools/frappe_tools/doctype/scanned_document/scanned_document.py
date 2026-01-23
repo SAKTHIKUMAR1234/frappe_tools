@@ -2,12 +2,21 @@
 # For license information, please see license.txt
 
 import base64
-import io
+import os, io, base64, requests
 from PIL import Image
-import requests
 import frappe
 from frappe.model.document import Document
 from frappe.utils.pdf import get_pdf
+from urllib.parse import urlparse
+
+def _is_remote(url: str) -> bool:
+    return urlparse(url).scheme in ("http", "https")
+
+def _get_local_file_bytes(file_url: str) -> bytes:
+    site_path = frappe.get_site_path()
+    abs_path = os.path.join(site_path, file_url.lstrip("/"))
+    with open(abs_path, "rb") as f:
+        return f.read()
 
 class ScannedDocument(Document):
 		
@@ -78,29 +87,31 @@ def get_scan_pdf(name):
 	frappe.local.response.filecontent = pdf
 	frappe.local.response.type = "download"
 
-def compress_external_image(url, max_width_px=1080, quality=80):
-	"""
-	max_width_px ≈ A4 width @ ~200 DPI
-	"""
-	print("SSS")
-	resp = requests.get(url, timeout=10)
-	resp.raise_for_status()
 
-	img = Image.open(io.BytesIO(resp.content))
+def compress_image(source, max_width_px=1080, quality=80):
 
-	if img.mode in ("RGBA", "P"):
-		img = img.convert("RGB")
+    if _is_remote(source):
+        resp = requests.get(source, timeout=10)
+        resp.raise_for_status()
+        raw = resp.content
+    else:
+        raw = _get_local_file_bytes(source)
 
-	w, h = img.size
-	if w > max_width_px:
-		ratio = max_width_px / float(w)
-		img = img.resize((max_width_px, int(h * ratio)), Image.LANCZOS)
+    img = Image.open(io.BytesIO(raw))
 
-	buf = io.BytesIO()
-	img.save(buf, format="JPEG", optimize=True, quality=quality)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
 
-	encoded = base64.b64encode(buf.getvalue()).decode()
-	return f"data:image/jpeg;base64,{encoded}"
+    w, h = img.size
+    if w > max_width_px:
+        ratio = max_width_px / float(w)
+        img = img.resize((max_width_px, int(h * ratio)), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", optimize=True, quality=quality)
+
+    encoded = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/jpeg;base64,{encoded}"
 
 @frappe.whitelist()
 def get_section_details(layout, doc_details):
@@ -112,7 +123,7 @@ def get_section_details(layout, doc_details):
 		}
 	for i in doc_details['attachments']:
 		if i['attachment'] :
-			i['attachment'] = compress_external_image(i['attachment'])
+			i['attachment'] = compress_image(i['attachment'])
 		resp[i.get('title')]['images'].append({
 			"page_no" : i['page_no'],
 			"attachment" : i['attachment'],
