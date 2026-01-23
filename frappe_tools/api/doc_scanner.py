@@ -12,7 +12,11 @@ from PIL import Image
 from frappe import get_site_config
 import redis
 
+import random
+import string
+
 REDIS_SIGNAL_PREFIX = "doc_scanner_signal"
+REDIS_PIN_PREFIX = "doc_scanner_pin"
 
 def get_redis():
     conf = get_site_config()
@@ -20,8 +24,32 @@ def get_redis():
         conf.get("redis_cache", "redis://127.0.0.1:13000"),
         decode_responses=True
     )
+
 def _signal_key(room):
-	return f"{REDIS_SIGNAL_PREFIX}:{room}"
+    return f"{REDIS_SIGNAL_PREFIX}:{room}"
+
+def _pin_key(pin):
+    return f"{REDIS_PIN_PREFIX}:{pin}"
+
+@frappe.whitelist(allow_guest=True)
+def register_pin(room):
+    r = get_redis()
+    for _ in range(10):
+        pin = "".join(random.choices(string.digits, k=4))
+        key = _pin_key(pin)
+        if not r.exists(key):
+            r.set(key, room, ex=600)
+            return pin
+    frappe.throw("Could not generate PIN, please try again.")
+
+@frappe.whitelist(allow_guest=True)
+def resolve_pin(pin):
+    r = get_redis()
+    room = r.get(_pin_key(pin))
+    if not room:
+        frappe.throw("Invalid or Expired PIN")
+    return room
+
 
 def add_to_signals(room, signal_data):
 

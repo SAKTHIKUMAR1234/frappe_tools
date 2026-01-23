@@ -5,43 +5,16 @@
             <SessionIndicator />
         </div>
 
-        <div class="mt-2 d-flex justify-content-center flex-column align-items-center"
-            v-if="sessionStore.status !== 'connected'">
-            <QrCode v-if="qrProperties" :properties="qrProperties" />
-
-            <div class="mt-1">
-                <small>
-                    Scan this QR code with your mobile device to connect to the document scanner session.
-                </small>
-            </div>
-
-            <button class="btn btn-outline-secondary btn-sm mt-2" :disabled="sessionStore.status === 'connecting'"
-                @click="createNewSession">
-                Refresh Room
-            </button>
-        </div>
-
-        <div class="d-flex justify-content-center mt-2" v-if="props.is_new && sessionStore.status === 'connected'">
-            <button class="btn btn-outline-danger btn-sm" @click="createNewSession">
-                Disconnect & Create New Session
-            </button>
-        </div>
-
-        <DocScannerController v-if="qrProperties" ref="controllerRef" :is_new="props.is_new" :doctype="props.doctype"
+        <DocScannerController ref="controllerRef" :is_new="props.is_new" :doctype="props.doctype"
             :scan_name="props.scan_name" :document_name="props.document_name"
             @reload_session="() => createNewSession()" />
     </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
-import { v4 as uuidv4 } from 'uuid'
-
+import { ref } from 'vue'
 import SessionIndicator from '../Components/SessionIndicator.vue'
-import QrCode from '../Components/QrCode.vue'
 import DocScannerController from '../Components/DocScannerController.vue'
-
-import { useSessionStore } from '../../Store/docscanner_store'
 
 const props = defineProps({
     is_new: {
@@ -62,89 +35,5 @@ const props = defineProps({
     }
 })
 
-
-const sessionStore = useSessionStore()
-
-
 const controllerRef = ref(null)
-const room = ref(null)
-const iceServers = ref([])
-let realtimeHandler = null
-
-async function fetchIceServers() {
-    frappe.call({
-        method: 'frappe_tools.api.doc_scanner.get_ice_servers',
-        callback: (r) => {
-            iceServers.value = r.message || []
-        }
-    })
-}
-
-
-const qrProperties = computed(() => {
-    if (!room.value) return ''
-
-    // Minimal data to keep QR code scannable. 
-    // Mobile app should fetch ice_servers using the server_url.
-    return JSON.stringify({
-        r: room.value,             // room
-        dt: 'web',                 // device_type
-        u: window.location.origin, // server_url
-        s: frappe.boot.site_name,  // site_name
-    })
-})
-
-
-function bindRealtime(roomName) {
-    if (realtimeHandler && room.value) {
-        frappe.realtime.off(room.value, realtimeHandler)
-    }
-
-    realtimeHandler = (data) => {
-        if (data.device_type !== 'mobile') return
-
-        if (data.event === 'scanner_added') {
-            sessionStore.connecting()
-        }
-        else if (data.event === 'scanner_removed') {
-            sessionStore.disconnect()
-            createNewSession();
-        }
-        else if (data.event === 'signal') {
-            controllerRef.value?.handleSignals(data.data)
-        }
-    }
-
-    frappe.realtime.on(roomName, realtimeHandler)
-}
-
-
-function disconnectSession() {
-    if (room.value && realtimeHandler) {
-        frappe.realtime.off(room.value, realtimeHandler)
-    }
-
-    sessionStore.disconnect()
-    room.value = null
-    realtimeHandler = null
-}
-
-function createNewSession() {
-    disconnectSession()
-
-    const id = uuidv4()
-    room.value = `doc_scanner_session_room+${id}`
-
-    sessionStore.createSession(room.value)
-    bindRealtime(room.value)
-}
-
-onMounted(() => {
-    fetchIceServers()
-    createNewSession()
-})
-
-onBeforeUnmount(() => {
-    disconnectSession()
-})
 </script>

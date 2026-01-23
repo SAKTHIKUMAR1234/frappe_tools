@@ -120,5 +120,10 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
       this.curr_page_no = null;
       this.curr_page_type = null;
     },
+    clearAll() {
+      this.imagesList = [];
+      this.document_scanner_details = {};
+      this.reset();
+    }
   },
 });
