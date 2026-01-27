@@ -1,12 +1,11 @@
 <template>
     <div class="doc-section-card">
         <div class="doc-section-header">
-            {{ title }}
+            <span>{{ title }}</span>
+            <button class="icon-btn primary" title="Add Layout" @click="onAddLayout">
+                <i class="pi octicon octicon-plus"></i> <span>Add Page</span>
+            </button>
         </div>
-
-        <button class="btn btn-primary btn-sm m-2" @click="onAddLayout">
-            Add Layout
-        </button>
 
         <div class="doc-section-body">
             <div class="doc-list vertical">
@@ -15,7 +14,12 @@
                     :key="page.page_no"
                     class="doc-card"
                 >
+                    <button class="remove-page-icon" title="Remove Page" @click="onRemovePage(index)">
+                        <i class="pi octicon octicon-x"></i>
+                    </button>
+
                     <div class="doc-page front">
+                        <div class="page-label">Page {{ page.page_no }}</div>
                         <div class="doc-page-content">
                             <img
                                 v-if="page.front"
@@ -30,26 +34,14 @@
                                 :draggable="true"
                                 @dragover.stop="dragHandler.dragHover(title, page.page_no, 'Front')"
                             >
-                                Page
+                                <i class="pi octicon octicon-download"></i>
                             </div>
-                        </div>
 
-                        <div class="doc-page-actions" v-if="page.front">
-                            <button
-                                class="btn btn-danger btn-sm"
-                                @click="onRemoveImage(index)"
-                            >
-                                Remove
+                            <button v-if="page.front" class="img-remove-overlay" @click="onRemoveImage(index)">
+                                <i class="pi octicon octicon-trash"></i>
                             </button>
                         </div>
                     </div>
-
-                    <button
-                        class="btn btn-outline-danger btn-sm w-100 remove-page-btn"
-                        @click="onRemovePage(index)"
-                    >
-                        Remove Page
-                    </button>
                 </div>
             </div>
         </div>
@@ -115,98 +107,145 @@ const onRemovePage = (pageIndex) => {
 </script>
 
 <style scoped>
-.doc-list.vertical {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-
+/* BASE CONTAINER */
 .doc-section-card {
-    border: 1px solid #dcdcdc;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
-    background: #ffffff;
-    max-width: 1500px;
+    background: #fff;
     width: 100%;
-    overflow: hidden;
 }
 
 .doc-section-header {
-    padding: 12px 16px;
+    padding: 8px 12px;
     font-weight: 600;
-    border-bottom: 1px solid #e5e5e5;
-    background: #f7f7f7;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .doc-section-body {
-    padding: 16px;
+    padding: 12px;
 }
 
-.doc-card {
-    width: 230px;
-    border: 1px solid #d0d0d0;
-    border-radius: 6px;
-    padding: 10px;
-    background: #fafafa;
+/* MAINTAINING YOUR VERTICAL LIST STRUCTURE */
+.doc-list.vertical {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px; /* Tighter gap to match styling */
+}
+
+/* ALIGNED CARD STYLING */
+.doc-card {
+    position: relative;
+    width: 180px; /* Slightly wider for single vertical column */
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 8px;
+    background: #fff;
+    transition: box-shadow 0.2s;
+}
+
+.doc-card:hover {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
 }
 
 .doc-page {
-    border: 1px dashed #bdbdbd;
-    background: #ffffff;
-    border-radius: 4px;
-    height: 160px;
     display: flex;
     flex-direction: column;
+    gap: 4px;
+}
+
+.page-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    color: #94a3b8;
+    font-weight: bold;
+    text-align: left;
+    padding-left: 2px;
 }
 
 .doc-page-content {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+     position: relative;
+    height: 120px;
+    border: 1px solid #f1f5f9;
+    background: #f8fafc;
+    border-radius: 4px;
     overflow: hidden;
 }
 
 .doc-page img {
-    max-width: 100%;
-    max-height: 100%;
-    width: auto;
-    height: auto;
-    object-fit: contain;
+    width: 100%;
+    height: 100%;
+    object-fit: contain; /* Keeps image proportions */
 }
 
 .empty-page {
-    width: 100%;
     height: 100%;
-    border: 2px dashed #d0d0d0;
-    border-radius: 4px;
-    color: #999;
-    font-size: 14px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #fcfcfc;
+    color: #cbd5e1;
+    border: 2px dashed #e2e8f0;
 }
 
-.doc-page-actions {
-    padding: 6px;
+/* ICON BUTTONS & OVERLAYS */
+.icon-btn {
+    border: none;
+    background: transparent;
+    cursor: pointer;
     display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #3b82f6;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.img-remove-overlay {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(239, 68, 68, 0.9);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
     justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+    cursor: pointer;
 }
 
-.remove-page-btn {
-    margin-top: 6px;
+.doc-page-content:hover .img-remove-overlay {
+    opacity: 1;
 }
 
-.doc-page.front {
-    background: #ffffff;
+.remove-page-icon {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #64748b;
+    cursor: pointer;
+    z-index: 5;
 }
 
-.doc-page.back {
-    background: #fdfdfd;
+.remove-page-icon:hover {
+    background: #fee2e2;
+    color: #ef4444;
 }
-
 </style>

@@ -1,12 +1,11 @@
 <template>
     <div class="doc-section-card">
         <div class="doc-section-header">
-            {{ title }}
+            <span>{{ title }}</span>
+            <button class="icon-btn primary" title="Add Layout" @click="onAddLayout">
+                <i class="pi octicon octicon-plus"></i> <span>Add Layout</span>
+            </button>
         </div>
-
-        <button class="btn btn-primary btn-sm m-2" @click="onAddLayout">
-            Add Layout
-        </button>
 
         <div class="doc-section-body">
             <div class="doc-list">
@@ -15,10 +14,9 @@
                     :key="index"
                     class="doc-card"
                 >
-                    <!-- FRONT + BACK HORIZONTAL -->
                     <div class="doc-page-row">
-                        <!-- FRONT -->
-                        <div class="doc-page front">
+                        <div class="doc-page">
+                            <div class="page-label">Front</div>
                             <div class="doc-page-content">
                                 <img
                                     v-if="page.front"
@@ -33,22 +31,17 @@
                                     :draggable="true"
                                     @dragover.stop="dragHandler.dragHover(props.title, page.page_no, 'Front')"
                                 >
-                                    Front
+                                   <i class="pi octicon octicon-download"></i>
                                 </div>
-                            </div>
-
-                            <div class="doc-page-actions" v-if="page.front">
-                                <button
-                                    class="btn btn-danger btn-sm"
-                                    @click="onRemoveImage(index, 'front')"
-                                >
-                                    Remove
+                                
+                                <button v-if="page.front" class="img-remove-overlay" @click="onRemoveImage(index, 'front')">
+                                    <i class="pi octicon octicon-trash"></i>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- BACK -->
-                        <div class="doc-page back">
+                        <div class="doc-page">
+                            <div class="page-label">Back</div>
                             <div class="doc-page-content">
                                 <img
                                     v-if="page.back"
@@ -63,27 +56,18 @@
                                     :draggable="true"
                                     @dragover.stop="dragHandler.dragHover(props.title, page.page_no, 'Back')"
                                 >
-                                    Back
+                                    <i class="pi octicon octicon-download"></i>
                                 </div>
-                            </div>
 
-                            <div class="doc-page-actions" v-if="page.back">
-                                <button
-                                    class="btn btn-danger btn-sm"
-                                    @click="onRemoveImage(index, 'back')"
-                                >
-                                    Remove
+                                <button v-if="page.back" class="img-remove-overlay" @click="onRemoveImage(index, 'back')">
+                                    <i class="pi octicon octicon-trash"></i>
                                 </button>
                             </div>
                         </div>
                     </div>
 
-                    <!-- REMOVE PAGE -->
-                    <button
-                        class="btn btn-outline-danger btn-sm w-100 remove-page-btn"
-                        @click="onRemovePage(index)"
-                    >
-                        Remove Page
+                    <button class="remove-page-icon" title="Remove Page" @click="onRemovePage(index)">
+                        <i class="pi octicon octicon-x"></i>
                     </button>
                 </div>
             </div>
@@ -165,109 +149,153 @@ const onRemovePage = (pageIndex) => {
 };
 </script>
 
+
 <style scoped>
 .doc-section-card {
-    border: 1px solid #dcdcdc;
+    border: 1px solid #e2e8f0;
     border-radius: 8px;
-    background: #ffffff;
-    max-width: 1500px;
+    background: #fff;
     width: 100%;
-    overflow: hidden;
 }
 
 .doc-section-header {
-    padding: 12px 16px;
+    padding: 8px 12px;
     font-weight: 600;
-    border-bottom: 1px solid #e5e5e5;
-    background: #f7f7f7;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .doc-section-body {
-    padding: 16px;
+    padding: 12px;
 }
 
 .doc-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
+    gap: 12px; /* Reduced gap */
 }
 
-/* PAGE CARD */
+/* COMPACT PAGE CARD */
 .doc-card {
-    width: 360px;
-    border: 1px solid #d0d0d0;
+    position: relative;
+    width: 280px; /* Slimmer card */
+    border: 1px solid #e2e8f0;
     border-radius: 6px;
-    padding: 10px;
-    background: #fafafa;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    padding: 8px;
+    background: #fff;
+    transition: box-shadow 0.2s;
 }
 
-/* FRONT + BACK ROW */
+.doc-card:hover {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
 .doc-page-row {
     display: flex;
-    gap: 8px;
+    gap: 6px;
 }
 
-/* PAGE BOX */
 .doc-page {
     flex: 1;
-    border: 1px dashed #bdbdbd;
-    background: #ffffff;
-    border-radius: 4px;
-    height: 150px;
     display: flex;
     flex-direction: column;
+    gap: 4px;
 }
 
-/* IMAGE CONTAINER */
+.page-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: #94a3b8;
+    font-weight: bold;
+    text-align: center;
+}
+
 .doc-page-content {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    position: relative;
+    height: 110px; /* Slightly shorter for density */
+    border: 1px solid #f1f5f9;
+    background: #f8fafc;
+    border-radius: 4px;
     overflow: hidden;
 }
 
-/* IMAGE */
 .doc-page img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-}
-
-/* EMPTY DROP ZONE */
-.empty-page {
     width: 100%;
     height: 100%;
-    border: 2px dashed #d0d0d0;
+    object-fit: cover;
+}
+
+/* ICON BUTTONS */
+.icon-btn {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #3b82f6;
+    padding: 4px 8px;
     border-radius: 4px;
-    color: #999;
-    font-size: 14px;
+}
+
+.icon-btn:hover { background: #eff6ff; }
+
+/* OVERLAY TRASH BUTTON */
+.img-remove-overlay {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(239, 68, 68, 0.9);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #fcfcfc;
+    opacity: 0;
+    transition: opacity 0.2s;
+    cursor: pointer;
 }
 
-/* ACTIONS */
-.doc-page-actions {
-    padding: 6px;
+.doc-page-content:hover .img-remove-overlay {
+    opacity: 1;
+}
+
+/* REMOVE WHOLE PAGE X */
+.remove-page-icon {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
     display: flex;
+    align-items: center;
     justify-content: center;
+    font-size: 10px;
+    color: #64748b;
+    cursor: pointer;
 }
 
-/* REMOVE PAGE */
-.remove-page-btn {
-    margin-top: 6px;
+.remove-page-icon:hover {
+    background: #fee2e2;
+    color: #ef4444;
 }
 
-.doc-page.front {
-    background: #ffffff;
-}
-
-.doc-page.back {
-    background: #fdfdfd;
+.empty-page {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #cbd5e1;
+    border: 2px dashed #e2e8f0;
 }
 </style>
