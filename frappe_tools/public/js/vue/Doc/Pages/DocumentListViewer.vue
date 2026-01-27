@@ -118,19 +118,19 @@ function formatDate(date) {
 }
 
 const has_write_permission = computed(() =>
-    frappe.perm.has_perm(cur_frm.doc.doctype, 0, 'write', cur_frm.doc.name)
+    frappe.perm.has_perm(props.doctype, 0, 'write', props.docname)
 );
 
 const has_delete_permission = computed(() =>
-    frappe.perm.has_perm(cur_frm.doc.doctype, 0, 'delete', cur_frm.doc.name)
+    frappe.perm.has_perm(props.doctype, 0, 'delete', props.docname)
 );
 
 const has_create_permission = computed(() =>
-    frappe.perm.has_perm(cur_frm.doc.doctype, 0, 'create', cur_frm.doc.name)
+    frappe.perm.has_perm(props.doctype, 0, 'create', props.docname)
 );
 
 const has_print_permission = computed(() => {
-    return frappe.perm.has_perm(cur_frm.doc.doctype, 0, 'print', cur_frm.doc.name);
+    return frappe.perm.has_perm(props.doctype, 0, 'print', props.docname);
 })
 
 onMounted(fetchScannedDocumentsList);

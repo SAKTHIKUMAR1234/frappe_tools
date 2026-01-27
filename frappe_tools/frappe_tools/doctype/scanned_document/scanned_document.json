@@ -13,7 +13,7 @@
  "fields": [
   {
    "fieldname": "_doctype",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Doctype",
    "options": "DocType",
@@ -21,9 +21,10 @@
   },
   {
    "fieldname": "_docname",
-   "fieldtype": "Data",
+   "fieldtype": "Dynamic Link",
    "in_list_view": 1,
    "label": "Docname",
+   "options": "_doctype",
    "reqd": 1
   },
   {
@@ -38,7 +39,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-08 15:29:38.573258",
+ "modified": "2026-01-27 07:19:37.486447",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Scanned Document",
