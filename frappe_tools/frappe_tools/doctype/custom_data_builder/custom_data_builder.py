@@ -10,7 +10,6 @@ from bs4 import BeautifulSoup
 from frappe.www.printview import get_print_style
 from frappe.utils import get_site_path
 import base64
-from essdee.essdee.doctype.sd_signature.sd_signature import get_user_signature
 
 
 
