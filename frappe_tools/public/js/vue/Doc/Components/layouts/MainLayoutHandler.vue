@@ -177,6 +177,11 @@ async function validateUpdadeScannedDetails() {
     let dataToSend = dragMem.document_scanner_details.sections;
     let layout = dragMem.document_scanner_details.layout;
 
+    if (!dataToSend || !layout) {
+        frappe.msgprint(__('Please select a Document Layout first.'));
+        return;
+    }
+
     // Validation: Check if there's at least one image
     let hasImages = false;
     for (const section of Object.values(dataToSend)) {
@@ -336,15 +341,45 @@ onMounted(async () => {
 .main-content {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 10px;
+    gap: 12px;
+    padding: 0;
     flex: 1;
 }
 
 .action_section {
     display: flex;
     flex-direction: row;
-    justify-content: end;
-    gap: 50px;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 4px;
+}
+
+.action_section .btn {
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 18px;
+    transition: all 0.15s ease;
+}
+
+.action_section .btn-primary {
+    background: #4f46e5;
+    border-color: #4f46e5;
+}
+
+.action_section .btn-primary:hover {
+    background: #4338ca;
+    border-color: #4338ca;
+}
+
+.action_section .btn-default {
+    border: 1px solid #e2e8f0;
+    color: #475569;
+    background: #fff;
+}
+
+.action_section .btn-default:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
 }
 </style>
