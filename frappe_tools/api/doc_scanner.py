@@ -273,9 +273,7 @@ def load_scanned_document_details(docname):
 			connection = getS3Connection()
 			attach["attachment"] = connection.get_pre_signed_url(
 				i["name"],
-				extra={
-					"ResponseContentType": f"image/{i['file_type'].lower()}",
-				},
+				content_type=f"image/{i['file_type'].lower()}",
 			)
 
 		response["attachments"].append(attach)
@@ -400,6 +398,64 @@ def delete_scanned_docs(doc):
 	frappe.get_doc("Scanned Document", doc).delete(
 		ignore_permissions=True
 	)
+
+
+@frappe.whitelist()
+def get_attach_fields(doctype, docname):
+	frappe.has_permission(doctype, doc=docname, ptype="read", throw=True)
+
+	meta = frappe.get_meta(doctype)
+	doc = frappe.get_doc(doctype, docname)
+
+	fields = []
+	for df in meta.fields:
+		if df.fieldtype in ("Attach", "Attach Image"):
+			fields.append({
+				"fieldname": df.fieldname,
+				"label": df.label,
+				"fieldtype": df.fieldtype,
+				"currentValue": doc.get(df.fieldname),
+			})
+
+	return fields
+
+
+@frappe.whitelist()
+def attach_image_to_field(doctype, docname, fieldname, image_data):
+	frappe.has_permission(doctype, doc=docname, ptype="write", throw=True)
+
+	meta = frappe.get_meta(doctype)
+	df = meta.get_field(fieldname)
+	if not df or df.fieldtype not in ("Attach", "Attach Image"):
+		frappe.throw(f"Field '{fieldname}' is not a valid Attach or Attach Image field")
+
+	# Delete old file if replacing
+	doc = frappe.get_doc(doctype, docname)
+	old_value = doc.get(fieldname)
+	if old_value:
+		old_file = frappe.db.get_value(
+			"File",
+			{"file_url": old_value, "attached_to_doctype": doctype, "attached_to_name": docname},
+			"name",
+		)
+		if old_file:
+			frappe.delete_doc("File", old_file, ignore_permissions=True)
+
+	file_url = create_image_upload(image_data, doctype, docname)
+
+	# Set attached_to_field on the File document
+	file_doc_name = frappe.db.get_value(
+		"File", {"file_url": file_url, "attached_to_doctype": doctype, "attached_to_name": docname}
+	)
+	if file_doc_name:
+		frappe.db.set_value("File", file_doc_name, "attached_to_field", fieldname)
+
+	# Reload doc since old file delete may have cleared the field
+	doc.reload()
+	doc.set(fieldname, file_url)
+	doc.save()
+
+	return {"file_url": file_url}
 
 
 def get_document_field_values(

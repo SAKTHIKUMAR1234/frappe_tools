@@ -1,7 +1,6 @@
 <template>
-    <div class="container h-100 mt-2 d-flex flex-column">
-
-        <div class="d-flex justify-content-end p-10">
+    <div class="scanner-page">
+        <div class="scanner-page-header">
             <SessionIndicator />
         </div>
 
@@ -37,3 +36,19 @@ const props = defineProps({
 
 const controllerRef = ref(null)
 </script>
+
+<style scoped>
+.scanner-page {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 8px 0;
+    max-width: 100%;
+}
+
+.scanner-page-header {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0 4px;
+}
+</style>

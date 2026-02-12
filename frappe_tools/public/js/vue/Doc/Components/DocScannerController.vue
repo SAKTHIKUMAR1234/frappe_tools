@@ -37,14 +37,53 @@
             </div>
         </div>
 
-        <div class="main_container">
-            <UnsedImagesCarrosal style="width : 60%" :images="dragStore.imagesList" @remove="removeImage"
-                @update:images="val => imagesList = val" />
-            <MainLayoutHandler style="width : 40%" :is_new="localIsNew" :document_name="localDocname"
-                :scan_name="props.scan_name" :doctype="localDoctype" @newScan="startNewScan"
-                @created="localIsNew = false" />
-            <DocumentListViewer v-if="localDocname && localDoctype"
-                :docname="localDocname" :doctype="localDoctype" />
+        <div v-if="scanMode === 'template'" class="template-mode-wrapper">
+            <div class="doc-info-bar">
+                <div class="doc-info-bar-left">
+                    <div class="doc-info-bar-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7"/>
+                            <rect x="14" y="3" width="7" height="7"/>
+                            <rect x="14" y="14" width="7" height="7"/>
+                            <rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                    </div>
+                    <span class="doc-info-bar-label">Template Scanning</span>
+                    <span class="doc-info-bar-sep">&middot;</span>
+                    <span class="doc-info-bar-value">{{ localDoctype }}</span>
+                    <span class="doc-info-bar-sep">&middot;</span>
+                    <span class="doc-info-bar-value">{{ localDocname }}</span>
+                </div>
+                <button class="doc-info-bar-btn" @click="startNewScan">
+                    Change Document
+                </button>
+            </div>
+            <div class="main_container">
+                <UnsedImagesCarrosal style="width : 60%" :images="dragStore.imagesList" @remove="removeImage"
+                    @update:images="val => imagesList = val" />
+                <MainLayoutHandler style="width : 40%" :is_new="localIsNew" :document_name="localDocname"
+                    :scan_name="props.scan_name" :doctype="localDoctype" @newScan="startNewScan"
+                    @created="localIsNew = false" />
+                <DocumentListViewer v-if="localDocname && localDoctype"
+                    :docname="localDocname" :doctype="localDoctype" />
+            </div>
+        </div>
+
+        <div v-else-if="scanMode === 'direct'" class="main_container direct-mode">
+            <DirectAttachmentPanel :doctype="localDoctype" :docname="localDocname" @changeDoc="startNewScan" @triggerScan="triggerMobileScanner" />
+        </div>
+
+        <div v-else class="main_container empty-mode">
+            <div class="empty-mode-content">
+                <div class="empty-mode-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                </div>
+                <h4>Ready to Scan</h4>
+                <p>Select a document and scan mode to begin.</p>
+            </div>
         </div>
     </div>
 </template>
@@ -58,12 +97,14 @@ import QRCode from 'qrcode';
 import UnsedImagesCarrosal from './UnsedImagesCarrosal.vue'
 import MainLayoutHandler from './layouts/MainLayoutHandler.vue'
 import DocumentListViewer from '../Pages/DocumentListViewer.vue';
+import DirectAttachmentPanel from './DirectAttachmentPanel.vue';
 
 const sessionStore = useSessionStore();
 const dragStore = useGloabalDragMemory();
 const qrcodeCanvas = ref(null);
 const origin = window.location.origin;
 const isScanning = ref(false);
+const scanMode = ref(null);
 
 const props = defineProps({
     is_new: { type: Boolean, default: true },
@@ -542,6 +583,7 @@ const checkAndPromptDocInfo = () => {
             localDoctype.value = values.doctype;
             localDocname.value = values.docname;
             d.hide();
+            showModeSelection();
         }
     });
 
@@ -599,12 +641,158 @@ const checkAndPromptDocInfo = () => {
     d.show();
 }
 
+function showModeSelection() {
+    const md = new frappe.ui.Dialog({
+        title: 'Select Scan Mode',
+        fields: [
+            {
+                fieldtype: 'HTML',
+                fieldname: 'mode_cards',
+            }
+        ],
+        static: true,
+    });
 
+    md.$wrapper.find('.modal-footer').hide();
+
+    const html = `
+        <div class="ms-container">
+            <p class="ms-desc">How would you like to scan documents for this record?</p>
+
+            <div class="ms-cards">
+                <div class="ms-card" data-mode="template">
+                    <div class="ms-card-icon ms-card-icon--tpl">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7"/>
+                            <rect x="14" y="3" width="7" height="7"/>
+                            <rect x="14" y="14" width="7" height="7"/>
+                            <rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                    </div>
+                    <div class="ms-card-body">
+                        <h5 class="ms-card-title">Template Scanning</h5>
+                        <p class="ms-card-text">Use scanner layouts to organize scanned pages into structured documents</p>
+                    </div>
+                    <div class="ms-card-arrow">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="ms-card" data-mode="direct">
+                    <div class="ms-card-icon ms-card-icon--dir">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                    </div>
+                    <div class="ms-card-body">
+                        <h5 class="ms-card-title">Direct Attachment</h5>
+                        <p class="ms-card-text">Scan images and attach directly to fields on the selected document</p>
+                    </div>
+                    <div class="ms-card-arrow">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <style>
+            .ms-container {
+                padding: 4px 0 8px;
+            }
+            .ms-desc {
+                margin: 0 0 18px;
+                font-size: 13px;
+                color: #64748b;
+            }
+            .ms-cards {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .ms-card {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                padding: 16px 18px;
+                border: 1px solid #e2e8f0;
+                border-radius: 10px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                background: #fff;
+            }
+            .ms-card:hover {
+                border-color: #cbd5e1;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03);
+            }
+            .ms-card:hover .ms-card-arrow {
+                opacity: 1;
+                transform: translateX(2px);
+            }
+            .ms-card:active {
+                transform: scale(0.99);
+            }
+            .ms-card-icon {
+                width: 48px;
+                height: 48px;
+                border-radius: 12px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+            }
+            .ms-card-icon--tpl {
+                background: #fef3c7;
+                color: #d97706;
+            }
+            .ms-card-icon--dir {
+                background: #eef2ff;
+                color: #4f46e5;
+            }
+            .ms-card-body {
+                flex: 1;
+                min-width: 0;
+            }
+            .ms-card-title {
+                margin: 0 0 3px;
+                font-size: 14px;
+                font-weight: 650;
+                color: #1e293b;
+            }
+            .ms-card-text {
+                margin: 0;
+                font-size: 12.5px;
+                color: #94a3b8;
+                line-height: 1.5;
+            }
+            .ms-card-arrow {
+                color: #cbd5e1;
+                opacity: 0;
+                transition: all 0.2s ease;
+                flex-shrink: 0;
+            }
+        </style>
+    `;
+
+    md.get_field('mode_cards').$wrapper.html(html);
+
+    md.$wrapper.find('.ms-card').on('click', function () {
+        const mode = $(this).data('mode');
+        scanMode.value = mode;
+        md.hide();
+    });
+
+    md.show();
+}
 
 const startNewScan = () => {
     localDoctype.value = null;
     localDocname.value = null;
     localIsNew.value = true;
+    scanMode.value = null;
     dragStore.clearAll();
 
     const newPath = `document-scanner/new`;
@@ -628,7 +816,15 @@ onMounted(async () => {
     await sessionStore.generatePin();
     await fetchIceServers();
     await fetchAllowedDoctypes();
-    if(!localDoctype.value || !localDocname.value) checkAndPromptDocInfo();
+    if(!localDoctype.value || !localDocname.value) {
+        checkAndPromptDocInfo();
+    } else if (localIsNew.value) {
+        // New scan with known doctype/docname — let user pick mode
+        showModeSelection();
+    } else {
+        // Existing scan loaded via URL — go straight to template mode
+        scanMode.value = 'template';
+    }
 })
 
 onBeforeUnmount(() => {
@@ -645,27 +841,31 @@ defineExpose({ handleSignals })
 .root-container {
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 16px;
     width: 100%;
 }
 
+/* ── Connection Bar ── */
 .connection-bar {
-    background: var(--card-bg);
-    /* Match card style */
-    border: 1px solid var(--border-color);
-    padding: 10px 15px;
-    border-radius: 6px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    padding: 12px 20px;
+    border-radius: 10px;
     display: flex;
     justify-content: center;
     align-items: center;
     position: sticky;
     top: 0;
     z-index: 1049;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .status-connected {
-    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #1e293b;
+    font-size: 13px;
     font-weight: 500;
 }
 
@@ -674,11 +874,12 @@ defineExpose({ handleSignals })
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    margin-right: 6px;
+    margin-right: 2px;
 }
 
 .indicator.online {
-    background-color: var(--green-500);
+    background-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
 }
 
 .status-disconnected {
@@ -691,37 +892,190 @@ defineExpose({ handleSignals })
 .setup-section {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
 }
 
 .label {
-    color: var(--text-muted);
-    font-size: 0.9em;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 500;
 }
 
 .pin-code-small {
-    font-size: 1.2rem;
+    font-size: 1.3rem;
     font-weight: 700;
-    font-family: monospace;
-    letter-spacing: 2px;
-    background: var(--bg-light-gray);
-    padding: 2px 8px;
-    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    letter-spacing: 4px;
+    background: #f1f5f9;
+    color: #1e293b;
+    padding: 4px 14px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
 }
 
 .link-btn {
-    margin-left: 5px;
+    margin-left: 4px;
+    border-radius: 6px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    padding: 4px 12px !important;
+    border: 1px solid #e2e8f0 !important;
+    transition: all 0.15s ease;
+}
+
+.link-btn.btn-primary {
+    background: #4f46e5 !important;
+    border-color: #4f46e5 !important;
+    color: #fff !important;
+}
+
+.link-btn.btn-primary:hover:not(:disabled) {
+    background: #4338ca !important;
+}
+
+.link-btn.btn-danger {
+    background: transparent !important;
+    border-color: #fca5a5 !important;
+    color: #dc2626 !important;
+}
+
+.link-btn.btn-danger:hover {
+    background: #fef2f2 !important;
+}
+
+.link-btn.btn-default {
+    background: #fff !important;
+    color: #475569 !important;
+}
+
+.link-btn.btn-default:hover {
+    background: #f8fafc !important;
+    border-color: #cbd5e1 !important;
 }
 
 .qr-canvas-small {
     height: 100px !important;
     width: 100px !important;
+    border-radius: 8px;
 }
 
+/* ── Template Mode Wrapper ── */
+.template-mode-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+}
+
+.doc-info-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+}
+
+.doc-info-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.doc-info-bar-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: #fef3c7;
+    color: #d97706;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.doc-info-bar-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.doc-info-bar-sep {
+    color: #cbd5e1;
+    font-size: 14px;
+}
+
+.doc-info-bar-value {
+    font-size: 13px;
+    color: #64748b;
+    font-weight: 500;
+}
+
+.doc-info-bar-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.doc-info-bar-btn:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+/* ── Main Container ── */
 .main_container {
     display: flex;
     flex-direction: row;
-    gap: 10px;
+    gap: 12px;
     width: 100%;
+}
+
+.main_container.direct-mode {
+    flex-direction: column;
+}
+
+.main_container.empty-mode {
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 200px);
+}
+
+.empty-mode-content {
+    text-align: center;
+    padding: 48px 24px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    max-width: 360px;
+}
+
+.empty-mode-icon {
+    color: #cbd5e1;
+    margin-bottom: 18px;
+}
+
+.empty-mode-content h4 {
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 650;
+    color: #1e293b;
+}
+
+.empty-mode-content p {
+    margin: 0;
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.5;
 }
 </style>
