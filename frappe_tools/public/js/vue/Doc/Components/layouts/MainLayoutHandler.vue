@@ -205,7 +205,7 @@ async function validateUpdadeScannedDetails() {
             "docname": props.document_name,
             "is_new": props.is_new,
             "documents": JSON.stringify(attachmentNames),
-            "scan_name": props.scan_name
+            "scan_name": localScanName.value
         },
         "callback": (r) => {
             localScanName.value = r.message;

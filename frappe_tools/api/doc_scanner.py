@@ -297,13 +297,19 @@ def upload_image(image_data):
 	})
 	doc.save(ignore_permissions=True)
 
-	if image_data.get("attachment"):
-		file_name = create_image_upload(
-			image_data["attachment"],
-			"Scanned Document Detail",
-			doc.name
-		)
-		doc.db_set("attachment", file_name)
+	attachment = image_data.get("attachment")
+	if attachment:
+		if attachment.startswith("data:"):
+			# New base64 image - upload it
+			file_name = create_image_upload(
+				attachment,
+				"Scanned Document Detail",
+				doc.name
+			)
+			doc.db_set("attachment", file_name)
+		else:
+			# Existing file URL - set it directly without re-uploading
+			doc.db_set("attachment", attachment)
 
 	return doc.name
 
