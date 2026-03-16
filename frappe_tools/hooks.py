@@ -83,7 +83,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "frappe_tools.install.before_install"
-# after_install = "frappe_tools.install.after_install"
+after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
 
 # Uninstallation
 # ------------
@@ -263,9 +263,11 @@ scheduler_events = {
     }
 }
 
+after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
+
 fixtures =[
         {
             'dt' : 'Role',
-            'filters' : [['name', 'in', ['Scanner User']]]
+            'filters' : [['name', 'in', ['Scanner User', 'AI Bot']]]
         }
     ]
