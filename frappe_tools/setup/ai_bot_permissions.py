@@ -40,11 +40,18 @@ def setup_ai_bot_permissions():
 		doc.parentfield = "permissions"
 		doc.role = ROLE_NAME
 		doc.permlevel = 0
+		# Explicitly set desired permissions
 		doc.read = 1
 		doc.select = 1
 		doc.report = 1
 		doc.export = 1
 		doc.print = 1
+		# Explicitly disable — DB defaults these to 1
+		doc.create = 0
+		doc.write = 0
+		doc.delete = 0
+		doc.share = 0
+		doc.email = 0
 		doc.db_insert()
 
 		count += 1
