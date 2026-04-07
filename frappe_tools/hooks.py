@@ -196,12 +196,12 @@ has_permission = {
 
 # Request Events
 # ----------------
-# before_request = ["frappe_tools.utils.before_request"]
+before_request = ["frappe_tools.permissions.before_request"]
 # after_request = ["frappe_tools.utils.after_request"]
 
 # Job Events
 # ----------
-# before_job = ["frappe_tools.utils.before_job"]
+before_job = ["frappe_tools.permissions.before_job"]
 # after_job = ["frappe_tools.utils.after_job"]
 
 # User Data Protection
