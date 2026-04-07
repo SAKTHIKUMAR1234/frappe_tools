@@ -23,6 +23,7 @@ ROLE = "AI Bot"
 ALLOWED_PTYPES = {"read", "select", "report", "export", "print"}
 
 _PATCH_INSTALLED = False
+_REPORT_PAGE_PATCH_INSTALLED = False
 
 
 # Read-style ptypes that AI Bot is allowed to escalate. Anything not in this
@@ -129,15 +130,66 @@ def install_permission_patch():
 
 	_PATCH_INSTALLED = True
 
+	# Page/Report patches are tracked separately because they may fail at
+	# very early import time (before Frappe is fully bootstrapped).
+	_install_report_page_patch()
+
+
+def _install_report_page_patch():
+	"""Patch Report.is_permitted and Page.is_permitted for AI Bot bypass.
+
+	These methods check the `Has Role` child table on the Report/Page record
+	(and Custom Role entries) directly via `frappe.get_all` + `has_common`,
+	completely bypassing `frappe.permissions`. The has_permission and
+	get_role_permissions patches don't help here. We patch the controller
+	methods so AI Bot users short-circuit to True regardless of which roles
+	the report/page is restricted to.
+
+	Tracked via its own flag so we can retry if early-import failed.
+	"""
+	global _REPORT_PAGE_PATCH_INSTALLED
+	if _REPORT_PAGE_PATCH_INSTALLED:
+		return
+
+	try:
+		from frappe.core.doctype.report.report import Report
+		from frappe.core.doctype.page.page import Page
+	except Exception:
+		# Frappe not fully bootstrapped yet — before_request will retry.
+		return
+
+	original_report_is_permitted = Report.is_permitted
+
+	def patched_report_is_permitted(self):
+		if _is_ai_bot(getattr(frappe.session, "user", None)):
+			return True
+		return original_report_is_permitted(self)
+
+	Report.is_permitted = patched_report_is_permitted
+
+	original_page_is_permitted = Page.is_permitted
+
+	def patched_page_is_permitted(self):
+		if _is_ai_bot(getattr(frappe.session, "user", None)):
+			return True
+		return original_page_is_permitted(self)
+
+	Page.is_permitted = patched_page_is_permitted
+
+	_REPORT_PAGE_PATCH_INSTALLED = True
+
 
 def before_request():
 	"""Hook entry point — install the patch before handling each request."""
 	install_permission_patch()
+	# Retry Page/Report patch in case it failed at very early import time.
+	_install_report_page_patch()
 
 
 def before_job():
 	"""Hook entry point — install the patch before background jobs run."""
 	install_permission_patch()
+	_install_report_page_patch()
 
 
 # ----- Supplementary hooks (wired in hooks.py) -----------------------------
