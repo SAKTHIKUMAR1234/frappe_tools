@@ -6,65 +6,17 @@ BATCH_SIZE = 100
 
 
 def setup_ai_bot_permissions():
-	"""Grant read+select permission on all doctypes and reports to the AI Bot role.
+	"""Ensure the AI Bot role exists and has access to role-restricted reports.
 
-	Runs on after_install and after_migrate. Idempotent — skips doctypes/reports
-	that already have an AI Bot permission entry.
+	Doctype-level read access is granted at runtime by the has_permission hook
+	in frappe_tools.permissions, so no DocPerm rows are written here — those
+	get wiped by 'Restore Original Permissions' and bench migrate.
+
+	Reports use a separate 'Has Role' child table that survives restores, so
+	we still need to add AI Bot to reports that have role restrictions.
 	"""
 	ensure_role_exists()
-	setup_doctype_permissions()
 	setup_report_permissions()
-
-
-def setup_doctype_permissions():
-	"""Grant read+select DocPerm on all non-child, non-virtual doctypes."""
-	all_doctypes = frappe.get_all(
-		"DocType",
-		filters={"istable": 0, "is_virtual": 0},
-		pluck="name",
-	)
-
-	# Doctypes that already have AI Bot in DocPerm
-	existing_ai_bot = set(
-		frappe.get_all(
-			"DocPerm",
-			filters={"role": ROLE_NAME, "permlevel": 0},
-			pluck="parent",
-		)
-	)
-
-	count = 0
-	for dt in all_doctypes:
-		if dt in existing_ai_bot:
-			continue
-
-		doc = frappe.new_doc("DocPerm")
-		doc.parent = dt
-		doc.parenttype = "DocType"
-		doc.parentfield = "permissions"
-		doc.role = ROLE_NAME
-		doc.permlevel = 0
-		# Explicitly set desired permissions
-		doc.read = 1
-		doc.select = 1
-		doc.report = 1
-		doc.export = 1
-		doc.print = 1
-		# Explicitly disable — DB defaults these to 1
-		doc.create = 0
-		doc.write = 0
-		doc.delete = 0
-		doc.share = 0
-		doc.email = 0
-		doc.db_insert()
-
-		count += 1
-		if count % BATCH_SIZE == 0:
-			frappe.db.commit()
-
-	if count:
-		frappe.db.commit()
-		frappe.clear_cache()
 
 
 def setup_report_permissions():
