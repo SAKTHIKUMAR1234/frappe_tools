@@ -25,24 +25,11 @@ ALLOWED_PTYPES = {"read", "select", "report", "export", "print"}
 _PATCH_INSTALLED = False
 
 
-_FULL_READ_ROLE_PERMS = {
-	"read": 1,
-	"select": 1,
-	"report": 1,
-	"print": 1,
-	"email": 1,
-	"export": 1,
-	"write": 0,
-	"create": 0,
-	"delete": 0,
-	"submit": 0,
-	"cancel": 0,
-	"amend": 0,
-	"import": 0,
-	"share": 0,
-	"if_owner": {},
-	"has_if_owner_enabled": False,
-}
+# Read-style ptypes that AI Bot is allowed to escalate. Anything not in this
+# set falls through to the user's actual role permissions — so a user with
+# AI Bot + (e.g.) Sales User still gets normal write/create/delete from their
+# other role.
+_READ_PTYPES = ("read", "select", "report", "print", "email", "export")
 
 
 def _is_ai_bot(user):
@@ -77,16 +64,18 @@ def install_permission_patch():
 
 	def patched_has_permission(doctype, ptype="read", *args, **kwargs):
 		# Resolve user from kwargs, positional args, or session.
+		# Upstream signature: has_permission(doctype, ptype, doc, user, raise_exception, *, ...)
+		# After doctype+ptype are bound, args[0]=doc, args[1]=user.
 		user = kwargs.get("user")
-		if user is None and len(args) >= 3:
-			# Positional order in upstream: (doc, verbose, user, ...)
-			user = args[2]
+		if user is None and len(args) >= 2:
+			user = args[1]
 		if user is None:
 			user = getattr(frappe.session, "user", None)
 
 		if (
 			isinstance(doctype, str)
 			and ptype in ALLOWED_PTYPES
+			and user != "Administrator"  # Administrator already shortcuts to True
 			and _is_ai_bot(user)
 		):
 			return True
@@ -94,8 +83,12 @@ def install_permission_patch():
 		return original_has_permission(doctype, ptype, *args, **kwargs)
 
 	fp.has_permission = patched_has_permission
-	# Some call sites use frappe.has_permission directly — patch that too.
-	frappe.has_permission = patched_has_permission
+	# NOTE: do NOT also overwrite `frappe.has_permission`. That symbol is a
+	# wrapper in frappe/__init__.py which translates `throw=True` →
+	# `raise_exception=True` before calling `frappe.permissions.has_permission`.
+	# Replacing it would forward `throw` straight through and blow up with
+	# TypeError. The wrapper already routes through our patched
+	# `fp.has_permission`, so patching just the inner function is enough.
 
 	# ----- Patch get_role_permissions -----------------------------------------
 	# DatabaseQuery.build_match_conditions calls this directly and bypasses
@@ -104,6 +97,13 @@ def install_permission_patch():
 	original_get_role_permissions = fp.get_role_permissions
 
 	def patched_get_role_permissions(doctype_meta, *args, **kwargs):
+		# Always call the original first so we get whatever real permissions
+		# the user already has from their other roles. Then OR-in the AI Bot
+		# read-style flags. This is critical: a user with AI Bot + Sales User
+		# must keep their Sales User write/create/delete perms — we only add,
+		# never subtract.
+		result = original_get_role_permissions(doctype_meta, *args, **kwargs)
+
 		# Resolve user from kwargs, positional args, or session.
 		# Upstream signature: get_role_permissions(doctype_meta, user=None, is_owner=None, debug=False)
 		user = kwargs.get("user")
@@ -113,14 +113,17 @@ def install_permission_patch():
 			user = getattr(frappe.session, "user", None)
 
 		try:
-			if _is_ai_bot(user):
-				# Return a fresh copy so callers can mutate without poisoning
-				# the module-level constant.
-				return dict(_FULL_READ_ROLE_PERMS, if_owner={})
+			if user != "Administrator" and _is_ai_bot(user):
+				# Shallow-copy so we don't mutate the cached dict held by
+				# frappe.local.role_permissions.
+				if isinstance(result, dict):
+					result = dict(result)
+					for ptype in _READ_PTYPES:
+						result[ptype] = 1
 		except Exception:
 			pass
 
-		return original_get_role_permissions(doctype_meta, *args, **kwargs)
+		return result
 
 	fp.get_role_permissions = patched_get_role_permissions
 
