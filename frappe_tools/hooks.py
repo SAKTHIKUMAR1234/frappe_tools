@@ -117,13 +117,13 @@ after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+permission_query_conditions = {
+	"*": "frappe_tools.permissions.ai_bot_query_conditions",
+}
+
+has_permission = {
+	"*": "frappe_tools.permissions.ai_bot_has_permission",
+}
 
 # DocType Class
 # ---------------
