@@ -43,6 +43,7 @@ def save_file_always_new(
         "attached_to_field": df,
         "folder": folder,
         "file_size": file_size,
+        "content_hash": content_hash,
         "is_private": is_private,
     })
     file_doc = frappe.get_doc(file_data)
