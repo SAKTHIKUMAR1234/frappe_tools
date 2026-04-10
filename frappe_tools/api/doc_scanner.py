@@ -336,10 +336,9 @@ def create_image_upload(attach, doctype, docname):
 		content = output.getvalue()
 		if "frappe_s3_integration" in frappe.get_installed_apps():
 			setting = frappe.get_single("File Image Settings")
-			if not setting.get("optimize_images_in_s3"):
-				return
-			from frappe_s3_integration.frappe_s3_integration.image_optimization.optimization_scheduler import optimize_image
-			content = optimize_image(content=content, content_type=mime, optimize=True, quality=cint(setting.get("image_optimization_quantity")))
+			if setting.get("optimize_images_in_s3"):
+				from frappe_s3_integration.frappe_s3_integration.image_optimization.optimization_scheduler import optimize_image
+				content = optimize_image(content=content, content_type=mime, optimize=True, quality=cint(setting.get("image_optimization_quantity")))
 	except Exception:
 		frappe.throw("Invalid or unsupported image format")
 
