@@ -207,7 +207,10 @@ def get_document_details(doctype, docname):
 	
 
 @frappe.whitelist()
-def get_scanned_documents_list(doctype, docname): 
+def get_scanned_documents_list(doctype, docname):
+	if not frappe.has_permission(doctype, doc=docname, ptype="print"):
+		frappe.throw(frappe._("You do not have print permission on {0} {1}").format(doctype, docname), frappe.PermissionError)
+
 	return frappe.get_all(
 		"Scanned Document",
 		filters={
@@ -215,13 +218,21 @@ def get_scanned_documents_list(doctype, docname):
 			"_docname": docname
 		},
 		order_by="creation desc",
-		fields=["*"]
+		fields=["*"],
+		ignore_permissions=True
 	)
 
 
 @frappe.whitelist()
 def load_scanned_document_details(docname):
 	document = frappe.get_doc("Scanned Document", docname)
+
+	# Check print permission on the parent document, not the Scanned Document itself
+	if not frappe.has_permission(document._doctype, doc=document._docname, ptype="print"):
+		frappe.throw(
+			frappe._("You do not have print permission on {0} {1}").format(document._doctype, document._docname),
+			frappe.PermissionError
+		)
 
 	query = f"""
 		SELECT 
@@ -271,10 +282,18 @@ def load_scanned_document_details(docname):
 		):
 			from frappe_s3_integration.s3_core import getS3Connection
 			connection = getS3Connection()
-			attach["attachment"] = connection.get_pre_signed_url(
-				i["name"],
-				content_type=f"image/{i['file_type'].lower()}",
-			)
+			# Permission already validated on parent document above.
+			# Use generate_temporary_url directly to avoid S3 integration's
+			# file-level permission check (which checks Scanned Document Detail
+			# permissions instead of the parent document's print permission).
+			file_info = frappe.db.get_value("File", i["name"],
+				["custom_s3_bucket_name", "custom_s3_key"], as_dict=True)
+			if file_info and file_info.custom_s3_key and file_info.custom_s3_bucket_name:
+				attach["attachment"] = connection.generate_temporary_url(
+					bucket_name=file_info.custom_s3_bucket_name,
+					key=file_info.custom_s3_key,
+					content_type=f"image/{i['file_type'].lower()}",
+				)
 
 		response["attachments"].append(attach)
 
