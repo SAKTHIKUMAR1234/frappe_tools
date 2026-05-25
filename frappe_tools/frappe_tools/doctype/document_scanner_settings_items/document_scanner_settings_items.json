@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "doctype_link",
+  "report_date_fields",
   "field_to_show",
   "filters",
   "order_by"
@@ -19,6 +20,13 @@
    "label": "Doctype Link",
    "options": "DocType",
    "reqd": 1
+  },
+  {
+   "description": "JSON list of date/datetime fields offered as filter options in the document reports. Each entry: {\"field\": \"posting_date\", \"type\": \"Date\", \"label\": \"Posting Date\", \"default\": \"\"}. 'field' is the actual fieldname (creation/modified allowed); 'type' (Date or Datetime, case-insensitive) decides how the report filter renders and may differ from the column's real type (e.g. filter a Datetime column as a Date); 'label' is optional and is the text shown in the report's field dropdown (falls back to the doctype's field label); 'default' is optional and prefills the start of the range. Defaults to a single creation field when left blank.",
+   "fieldname": "report_date_fields",
+   "fieldtype": "Code",
+   "label": "Report Date Fields",
+   "options": "JSON"
   },
   {
    "fieldname": "field_to_show",
