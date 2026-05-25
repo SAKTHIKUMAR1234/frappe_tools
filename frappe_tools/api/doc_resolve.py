@@ -257,8 +257,10 @@ def create_supplier(extraction, supplier_name, gstin=None, supplier_group=None):
 
 	supplier = frappe.new_doc("Supplier")
 	supplier.supplier_name = supplier_name
-	if supplier_group:
-		supplier.supplier_group = supplier_group
+	supplier.supplier_group = supplier_group or _default_supplier_group()
+	# supplier_type is mandatory in ERPNext; default it if the dialog didn't supply one.
+	if _has_field("Supplier", "supplier_type") and not supplier.get("supplier_type"):
+		supplier.supplier_type = "Company"
 	if gstin and _has_field("Supplier", "gstin"):
 		supplier.gstin = gstin.strip().upper()
 	supplier.insert()
@@ -305,4 +307,11 @@ def _learn(doc, line, item_code):
 		uom=line.uom,
 		extraction=doc.name,
 		target_doctype=doc.target_doctype,
+	)
+
+
+def _default_supplier_group():
+	return (
+		frappe.db.get_single_value("Buying Settings", "supplier_group")
+		or (frappe.get_all("Supplier Group", filters={"is_group": 0}, pluck="name", limit=1) or ["All Supplier Groups"])[0]
 	)
