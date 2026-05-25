@@ -1,11 +1,32 @@
 import frappe
 
+from frappe_tools.frappe_tools.report.scanned_document_detail_report.scanned_document_detail_report import (
+	get_filter_field_config,
+)
+
+
 def execute(filters=None):
     filters = filters or {}
 
     doctype = filters.get("document_type")
     if not doctype:
         frappe.throw("DocType is required")
+
+    filter_field = filters.get("filter_field")
+    if not filter_field:
+        frappe.throw("Please select the field to filter by")
+
+    field_conf = get_filter_field_config(doctype, filter_field)
+
+    if field_conf.get("type") == "Datetime":
+        from_date = filters.get("datetime_start")
+        to_date = filters.get("datetime_end")
+    else:
+        from_date = filters.get("date_start")
+        to_date = filters.get("date_end")
+
+    if not from_date or not to_date:
+        frappe.throw("Please set the start and end range for the selected field")
 
     meta = frappe.get_meta(doctype)
 
@@ -30,13 +51,7 @@ def execute(filters=None):
     })
 
     query_filters = {"docstatus": ["<", 2]}
-
-    from_date = filters.get("start_date")
-    to_date = filters.get("end_date")
-    date_field = 'creation'
-
-    if from_date and to_date:
-        query_filters[date_field] = ["between", [from_date, to_date]]
+    query_filters[filter_field] = ["between", [from_date, to_date]]
 
     data = frappe.get_all(
         doctype,
@@ -60,6 +75,12 @@ def execute(filters=None):
 
     for row in data:
         row["is_scanned"] = 1 if row.name in scanned_set else 0
+
+    scan_status = filters.get("scan_status")
+    if scan_status == "Scanned":
+        data = [row for row in data if row.is_scanned]
+    elif scan_status == "Not Scanned":
+        data = [row for row in data if not row.is_scanned]
 
     return columns, data
 
