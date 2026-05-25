@@ -14,22 +14,28 @@ frappe.provide('frappe.frappe_tools.doc_scanner');
 
 
 frappe.frappe_tools.doc_scanner.ImageScanner = class {
-    constructor({wrapper, is_new, document_name, doctype, scan_name}={}) {
+    constructor({wrapper, is_new, document_name, doctype, scan_name, extract, target_doctype, extraction}={}) {
         this.$wrapper = $(wrapper);
         this.is_new = is_new;
         this.document_name = document_name;
         this.doctype = doctype;
         this.scan_name = scan_name;
+        this.extract = extract;
+        this.target_doctype = target_doctype;
+        this.extraction = extraction;
         this.make_body();
     }
-    
+
     make_body() {
         this.$page_container = $('<div class="attribute-value-template frappe-control">').appendTo(this.$wrapper);
         this.app = createApp(ImageScanner, {
             is_new: this.is_new,
             document_name: this.document_name,
             doctype: this.doctype,
-            scan_name : this.scan_name
+            scan_name : this.scan_name,
+            extract: this.extract,
+            target_doctype: this.target_doctype,
+            extraction: this.extraction
         });
         this.app.use(pinia);
         SetVueGlobals(this.app);
@@ -45,7 +51,7 @@ frappe.frappe_tools.doc_scanner.DocumentListViewer = class {
         this.docname = docname;
         this.make_body();
     }
-    
+
     make_body() {
         this.$page_container = $('<div class="attribute-value-template frappe-control">').appendTo(this.$wrapper);
         this.app = createApp(DocumentListViewer, {

@@ -41,3 +41,26 @@ function addDocScannerButton(frm) {
     });
   });
 }
+
+// "Create from Scan" — list-view entry point for AI document extraction.
+// Shown on the List View of any DocType that has at least one enabled Rule Book.
+$(document).on("app_ready", function () {
+  frappe.call({
+    method: "frappe_tools.api.doc_extract.get_extractable_doctypes",
+    callback(r) {
+      (r.message || []).forEach(function (entry) {
+        const dt = entry.doctype;
+        const existing = frappe.listview_settings[dt] || {};
+        const prev_onload = existing.onload;
+        frappe.listview_settings[dt] = Object.assign(existing, {
+          onload(listview) {
+            if (typeof prev_onload === "function") prev_onload(listview);
+            listview.page.add_inner_button(__("Create from Scan"), function () {
+              frappe.set_route("document-scanner", "extract", dt);
+            });
+          },
+        });
+      });
+    },
+  });
+});

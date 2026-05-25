@@ -1,0 +1,167 @@
+{
+ "actions": [],
+ "autoname": "AILOG-.#####",
+ "creation": "2026-05-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "extraction",
+  "target_doctype",
+  "model",
+  "provider",
+  "status",
+  "column_break_meta",
+  "http_status",
+  "latency_ms",
+  "prompt_tokens",
+  "completion_tokens",
+  "total_tokens",
+  "cost_usd",
+  "payload_section",
+  "request_payload",
+  "response_payload",
+  "error_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "extraction",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Document Extraction",
+   "options": "Document Extraction",
+   "read_only": 1
+  },
+  {
+   "fieldname": "target_doctype",
+   "fieldtype": "Link",
+   "label": "Target DocType",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Model",
+   "read_only": 1
+  },
+  {
+   "default": "OpenRouter",
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Success\nError\nTimeout",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "http_status",
+   "fieldtype": "Int",
+   "label": "HTTP Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "latency_ms",
+   "fieldtype": "Int",
+   "label": "Latency (ms)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "prompt_tokens",
+   "fieldtype": "Int",
+   "label": "Prompt Tokens",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completion_tokens",
+   "fieldtype": "Int",
+   "label": "Completion Tokens",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_tokens",
+   "fieldtype": "Int",
+   "label": "Total Tokens",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cost_usd",
+   "fieldtype": "Float",
+   "label": "Cost (USD)",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Payloads"
+  },
+  {
+   "description": "Request JSON with image data redacted.",
+   "fieldname": "request_payload",
+   "fieldtype": "Code",
+   "label": "Request Payload",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "response_payload",
+   "fieldtype": "Code",
+   "label": "Response Payload",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document AI Call Log",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Scanner User",
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
