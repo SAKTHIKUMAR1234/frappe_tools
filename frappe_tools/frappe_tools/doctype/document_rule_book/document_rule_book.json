@@ -15,7 +15,12 @@
   "instructions_section",
   "instructions",
   "field_rules_section",
-  "field_rules"
+  "field_rules",
+  "tables_section",
+  "tables",
+  "postprocess_section",
+  "consolidate_lines",
+  "common_item"
  ],
  "fields": [
   {
@@ -49,7 +54,7 @@
    "label": "Priority"
   },
   {
-   "description": "Fieldname of the child table to populate from line items (e.g. 'items' for Purchase Invoice). Leave blank for header-only documents.",
+   "description": "Legacy single-table fieldname (fallback). Prefer the Tables grid below, which supports one or more child tables.",
    "fieldname": "line_table",
    "fieldtype": "Data",
    "label": "Line Item Table Fieldname"
@@ -81,6 +86,39 @@
    "fieldtype": "Table",
    "label": "Field Rules",
    "options": "Document Rule Book Field"
+  },
+  {
+   "fieldname": "tables_section",
+   "fieldtype": "Section Break",
+   "label": "Child Tables to Extract"
+  },
+  {
+   "description": "Child tables on the target DocType to extract (e.g. items). Empty = header-only. Supersedes the legacy single fieldname above.",
+   "fieldname": "tables",
+   "fieldtype": "Table",
+   "label": "Tables",
+   "options": "Document Rule Book Table"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "postprocess_section",
+   "fieldtype": "Section Break",
+   "label": "Post-processing (extension-specific)"
+  },
+  {
+   "default": "0",
+   "description": "If set, the doctype extension may collapse extracted rows into one common item (e.g. Purchase Invoice). General doctypes keep rows 1:1.",
+   "fieldname": "consolidate_lines",
+   "fieldtype": "Check",
+   "label": "Consolidate Lines into Common Item"
+  },
+  {
+   "depends_on": "eval:doc.consolidate_lines",
+   "description": "Item to consolidate all extracted lines into when consolidation is enabled.",
+   "fieldname": "common_item",
+   "fieldtype": "Link",
+   "label": "Common Item",
+   "options": "Item"
   }
  ],
  "index_web_pages_for_search": 1,

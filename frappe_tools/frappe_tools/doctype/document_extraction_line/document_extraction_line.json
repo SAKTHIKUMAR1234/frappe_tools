@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "row_no",
+  "table",
   "description",
   "supplier_code",
   "hsn",
@@ -30,6 +31,13 @@
    "fieldtype": "Int",
    "in_list_view": 1,
    "label": "#"
+  },
+  {
+   "description": "Child table fieldname this row populates (e.g. items).",
+   "fieldname": "table",
+   "fieldtype": "Data",
+   "label": "Target Table",
+   "read_only": 1
   },
   {
    "columns": 3,
