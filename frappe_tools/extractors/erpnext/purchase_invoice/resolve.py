@@ -8,7 +8,7 @@ import json
 
 import frappe
 
-from frappe_tools.api import doc_resolve
+from frappe_tools.extractors.erpnext import matching
 from frappe_tools.utils import embeddings, learning
 
 TABLE = "items"
@@ -29,7 +29,7 @@ def _resolve_supplier(extraction):
 	printed = (name_field.llm_value or name_field.value) if name_field else None
 	gstin = (gstin_field.value or gstin_field.llm_value) if gstin_field else None
 
-	res = doc_resolve.resolve_supplier(printed, gstin)
+	res = matching.resolve_supplier(printed, gstin)
 	if name_field:
 		name_field.candidates_json = json.dumps(res["candidates"])
 		name_field.match_method = res["method"]
@@ -59,12 +59,12 @@ def _resolve_line(line, supplier):
 		return
 
 	# Tiers 1-5 — lexical (supplier-part-no / barcode / exact / fuzzy).
-	res = doc_resolve.resolve_item(supplier, code, desc, line.hsn)
+	res = matching.resolve_item(supplier, code, desc, line.hsn)
 	candidates = list(res.get("candidates") or [])
 
 	# Semantic layer (suggestion only).
 	if embeddings.is_enabled() and desc:
-		rows = doc_resolve.candidate_item_rows(desc, line.hsn, limit=60)
+		rows = matching.candidate_item_rows(desc, line.hsn, limit=60)
 		candidates = _merge(candidates, embeddings.rank_items_semantic(desc, rows, limit=8))
 
 	candidates.sort(key=lambda c: c.get("score", 0), reverse=True)
