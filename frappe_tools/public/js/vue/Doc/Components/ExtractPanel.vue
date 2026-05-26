@@ -56,7 +56,11 @@
         <!-- REVIEW -->
         <ExtractReviewPanel v-else-if="stage === 'review'" :extraction="extractionName" @created="onCreated" />
 
-        <!-- CREATED -->
+        <!-- VERIFY: the real document beside the scan, two-way highlight -->
+        <VerifySplitView v-else-if="stage === 'verify' && createdDoc" :extraction="extractionName"
+            :doctype="props.target_doctype" :docname="createdDoc" @exit="emit('exit')" />
+
+        <!-- CREATED (fallback) -->
         <div v-else-if="stage === 'created'" class="ex-done">
             <div class="ex-done-check">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -81,6 +85,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useGloabalDragMemory } from '../../Store/doc_scanner_drag_drop_memory'
 import { useSessionStore } from '../../Store/docscanner_store'
 import ExtractReviewPanel from '../Pages/ExtractReviewPanel.vue'
+import VerifySplitView from '../Pages/VerifySplitView.vue'
 
 const props = defineProps({
     target_doctype: { type: String, required: true },
@@ -136,7 +141,7 @@ const realtimeHandler = (data) => {
 
 function onCreated(payload) {
     createdDoc.value = payload && payload.docname
-    stage.value = 'created'
+    stage.value = createdDoc.value ? 'verify' : 'created'
     dragStore.clearAll()
 }
 
@@ -156,7 +161,7 @@ onMounted(async () => {
             const st = r.message.status
             if (st === 'Created') {
                 createdDoc.value = r.message.created_document
-                stage.value = 'created'
+                stage.value = createdDoc.value ? 'verify' : 'created'
             } else if (st === 'Extracting') {
                 stage.value = 'extracting'
             } else {
