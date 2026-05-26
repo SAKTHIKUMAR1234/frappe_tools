@@ -16,6 +16,7 @@ _LOADED = False
 # Plugin modules to import for self-registration. New plugins add their dotted path.
 _PLUGIN_MODULES = (
 	"frappe_tools.extractors.erpnext.purchase_invoice.plugin",
+	"frappe_tools.extractors.essdee.return_goods.plugin",
 )
 
 
