@@ -13,11 +13,10 @@ import frappe
 _REGISTRY = {}
 _LOADED = False
 
-# Plugin modules to import for self-registration. New plugins add their dotted path.
-_PLUGIN_MODULES = (
-	"frappe_tools.extractors.erpnext.purchase_invoice.plugin",
-	"frappe_tools.extractors.essdee.return_goods.plugin",
-)
+# Plugins are contributed by ANY installed app via its hooks.py:
+#   doc_extraction_plugins = ["my_app.path.to.plugin", ...]
+# frappe_tools is only the common layer; document-specific plugins live in their
+# own app (e.g. essdee). The GenericPlugin is the built-in fallback for any DocType.
 
 
 def register(cls):
@@ -31,7 +30,11 @@ def _ensure_loaded():
 	if _LOADED:
 		return
 	_LOADED = True
-	for module in _PLUGIN_MODULES:
+	try:
+		modules = frappe.get_hooks("doc_extraction_plugins") or []
+	except Exception:
+		modules = []
+	for module in modules:
 		try:
 			importlib.import_module(module)
 		except Exception:
