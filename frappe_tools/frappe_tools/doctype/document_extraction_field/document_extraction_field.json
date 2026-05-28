@@ -1,0 +1,144 @@
+{
+ "actions": [],
+ "creation": "2026-05-25 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "fieldname",
+  "label",
+  "fieldtype",
+  "value",
+  "matched_value",
+  "match_method",
+  "candidates_json",
+  "status",
+  "confidence",
+  "llm_value",
+  "llm_raw_text",
+  "bbox_json",
+  "source_page",
+  "edited_by",
+  "edited_on"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "fieldname",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Field Name",
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Label"
+  },
+  {
+   "fieldname": "fieldtype",
+   "fieldtype": "Data",
+   "label": "Field Type",
+   "read_only": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "value",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Value"
+  },
+  {
+   "description": "For Link fields: the resolved existing record this value maps to.",
+   "fieldname": "matched_value",
+   "fieldtype": "Data",
+   "label": "Matched Value",
+   "read_only": 1
+  },
+  {
+   "fieldname": "match_method",
+   "fieldtype": "Data",
+   "label": "Match Method",
+   "read_only": 1
+  },
+  {
+   "fieldname": "candidates_json",
+   "fieldtype": "Code",
+   "label": "Candidates JSON",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Pending\nApproved\nEdited\nRejected"
+  },
+  {
+   "columns": 1,
+   "fieldname": "confidence",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Confidence",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "llm_value",
+   "fieldtype": "Small Text",
+   "label": "LLM Value",
+   "read_only": 1
+  },
+  {
+   "description": "The text exactly as printed on the document.",
+   "fieldname": "llm_raw_text",
+   "fieldtype": "Small Text",
+   "label": "LLM Raw Text",
+   "read_only": 1
+  },
+  {
+   "description": "Normalised source region {x, y, w, h} on a 0..1 scale.",
+   "fieldname": "bbox_json",
+   "fieldtype": "Small Text",
+   "label": "BBox JSON",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "source_page",
+   "fieldtype": "Int",
+   "label": "Source Page",
+   "read_only": 1
+  },
+  {
+   "fieldname": "edited_by",
+   "fieldtype": "Link",
+   "label": "Edited By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "edited_on",
+   "fieldtype": "Datetime",
+   "label": "Edited On",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Extraction Field",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

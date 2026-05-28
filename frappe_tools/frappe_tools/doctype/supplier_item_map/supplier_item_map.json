@@ -1,0 +1,167 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "SIM-.#####",
+ "creation": "2026-05-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "source_system",
+  "target_doctype",
+  "supplier",
+  "item_code",
+  "column_break_key",
+  "printed_text",
+  "normalized_text",
+  "supplier_code",
+  "uom",
+  "stats_section",
+  "hit_count",
+  "confidence",
+  "last_used",
+  "created_from_extraction",
+  "embedding_section",
+  "text_embedding"
+ ],
+ "fields": [
+  {
+   "default": "ERPNext",
+   "fieldname": "source_system",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Source System"
+  },
+  {
+   "default": "Purchase Invoice",
+   "fieldname": "target_doctype",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Target DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Supplier",
+   "options": "Supplier",
+   "reqd": 1
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_key",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "printed_text",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Printed Text (as on invoice)"
+  },
+  {
+   "description": "Lowercased, whitespace-collapsed key used for exact memory lookup.",
+   "fieldname": "normalized_text",
+   "fieldtype": "Data",
+   "label": "Normalized Text",
+   "search_index": 1
+  },
+  {
+   "fieldname": "supplier_code",
+   "fieldtype": "Data",
+   "label": "Supplier Item Code",
+   "search_index": 1
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Data",
+   "label": "UOM"
+  },
+  {
+   "fieldname": "stats_section",
+   "fieldtype": "Section Break",
+   "label": "Usage"
+  },
+  {
+   "default": "1",
+   "fieldname": "hit_count",
+   "fieldtype": "Int",
+   "label": "Hit Count"
+  },
+  {
+   "default": "1",
+   "fieldname": "confidence",
+   "fieldtype": "Float",
+   "label": "Confidence",
+   "precision": "2"
+  },
+  {
+   "fieldname": "last_used",
+   "fieldtype": "Datetime",
+   "label": "Last Used"
+  },
+  {
+   "fieldname": "created_from_extraction",
+   "fieldtype": "Link",
+   "label": "Created From Extraction",
+   "options": "Document Extraction",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "embedding_section",
+   "fieldtype": "Section Break",
+   "label": "Embedding"
+  },
+  {
+   "fieldname": "text_embedding",
+   "fieldtype": "Code",
+   "label": "Text Embedding (JSON)",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Supplier Item Map",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Scanner User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

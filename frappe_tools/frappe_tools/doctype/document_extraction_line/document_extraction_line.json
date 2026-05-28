@@ -1,0 +1,155 @@
+{
+ "actions": [],
+ "creation": "2026-05-25 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "row_no",
+  "table",
+  "description",
+  "supplier_code",
+  "hsn",
+  "qty",
+  "uom",
+  "rate",
+  "amount",
+  "matched_item",
+  "resolution_status",
+  "match_method",
+  "match_confidence",
+  "candidates_json",
+  "raw_json",
+  "source_page",
+  "bbox_json"
+ ],
+ "fields": [
+  {
+   "columns": 1,
+   "default": "1",
+   "fieldname": "row_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "#"
+  },
+  {
+   "description": "Child table fieldname this row populates (e.g. items).",
+   "fieldname": "table",
+   "fieldtype": "Data",
+   "label": "Target Table",
+   "read_only": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Description (as printed)"
+  },
+  {
+   "fieldname": "supplier_code",
+   "fieldtype": "Data",
+   "label": "Supplier Item Code"
+  },
+  {
+   "fieldname": "hsn",
+   "fieldtype": "Data",
+   "label": "HSN"
+  },
+  {
+   "columns": 1,
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Qty"
+  },
+  {
+   "columns": 1,
+   "fieldname": "uom",
+   "fieldtype": "Data",
+   "label": "UOM"
+  },
+  {
+   "columns": 1,
+   "fieldname": "rate",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Rate"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount"
+  },
+  {
+   "columns": 2,
+   "fieldname": "matched_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Matched Item",
+   "options": "Item"
+  },
+  {
+   "columns": 1,
+   "default": "Unmatched",
+   "fieldname": "resolution_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Resolution",
+   "options": "Unmatched\nMatched\nConfirmed\nNew Item\nFree Text"
+  },
+  {
+   "fieldname": "match_method",
+   "fieldtype": "Data",
+   "label": "Match Method",
+   "read_only": 1
+  },
+  {
+   "fieldname": "match_confidence",
+   "fieldtype": "Float",
+   "label": "Match Confidence",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "description": "Ranked candidate items as JSON.",
+   "fieldname": "candidates_json",
+   "fieldtype": "Code",
+   "label": "Candidates JSON",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_json",
+   "fieldtype": "Code",
+   "label": "Raw LLM Line",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "source_page",
+   "fieldtype": "Int",
+   "label": "Source Page",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bbox_json",
+   "fieldtype": "Small Text",
+   "label": "BBox JSON",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Extraction Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -6,6 +6,7 @@
 
         <DocScannerController ref="controllerRef" :is_new="props.is_new" :doctype="props.doctype"
             :scan_name="props.scan_name" :document_name="props.document_name"
+            :extract="props.extract" :target_doctype="props.target_doctype" :extraction="props.extraction"
             @reload_session="() => createNewSession()" />
     </div>
 </template>
@@ -31,6 +32,18 @@ const props = defineProps({
     scan_name: {
         type: String,
         default: null
+    },
+    extract: {
+        type: Boolean,
+        default: false,
+    },
+    target_doctype: {
+        type: String,
+        default: null,
+    },
+    extraction: {
+        type: String,
+        default: null,
     }
 })
 

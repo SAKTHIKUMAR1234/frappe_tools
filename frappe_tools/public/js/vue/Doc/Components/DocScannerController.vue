@@ -73,6 +73,11 @@
             <DirectAttachmentPanel :doctype="localDoctype" :docname="localDocname" @changeDoc="startNewScan" @triggerScan="triggerMobileScanner" />
         </div>
 
+        <div v-else-if="scanMode === 'extract'" class="extract-mode-wrapper">
+            <ExtractPanel :target_doctype="localDoctype" :extraction="props.extraction"
+                @triggerScan="triggerMobileScanner" @exit="exitExtract" />
+        </div>
+
         <div v-else class="main_container empty-mode">
             <div class="empty-mode-content">
                 <div class="empty-mode-icon">
@@ -98,6 +103,7 @@ import UnsedImagesCarrosal from './UnsedImagesCarrosal.vue'
 import MainLayoutHandler from './layouts/MainLayoutHandler.vue'
 import DocumentListViewer from '../Pages/DocumentListViewer.vue';
 import DirectAttachmentPanel from './DirectAttachmentPanel.vue';
+import ExtractPanel from './ExtractPanel.vue';
 
 const sessionStore = useSessionStore();
 const dragStore = useGloabalDragMemory();
@@ -110,7 +116,10 @@ const props = defineProps({
     is_new: { type: Boolean, default: true },
     document_name: { type: String, default: null },
     doctype: { type: String, default: null },
-    scan_name: { type: String, default: null }
+    scan_name: { type: String, default: null },
+    extract: { type: Boolean, default: false },
+    target_doctype: { type: String, default: null },
+    extraction: { type: String, default: null }
 })
 
 const imageReceiveTimers = new Map();
@@ -801,6 +810,12 @@ const startNewScan = () => {
     checkAndPromptDocInfo();
 }
 
+const exitExtract = () => {
+    if (localDoctype.value) {
+        frappe.set_route('List', localDoctype.value);
+    }
+}
+
 const handleCtrlS = (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "s") {
         event.preventDefault();
@@ -815,6 +830,14 @@ onMounted(async () => {
 
     await sessionStore.generatePin();
     await fetchIceServers();
+
+    if (props.extract) {
+        // AI extraction flow — target doctype known from the route, no mode prompt.
+        localDoctype.value = props.target_doctype;
+        scanMode.value = 'extract';
+        return;
+    }
+
     await fetchAllowedDoctypes();
     if(!localDoctype.value || !localDocname.value) {
         checkAndPromptDocInfo();

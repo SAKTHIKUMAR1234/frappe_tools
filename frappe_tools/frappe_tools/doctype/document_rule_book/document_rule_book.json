@@ -1,0 +1,160 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "RULEBK-.#####",
+ "creation": "2026-05-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "target_doctype",
+  "enabled",
+  "priority",
+  "line_table",
+  "description",
+  "instructions_section",
+  "instructions",
+  "field_rules_section",
+  "field_rules",
+  "tables_section",
+  "tables",
+  "postprocess_section",
+  "consolidate_lines",
+  "common_item"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "target_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Target DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "0",
+   "description": "Higher priority rule books appear first in the prompt sent to the LLM.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority"
+  },
+  {
+   "description": "Legacy single-table fieldname (fallback). Prefer the Tables grid below, which supports one or more child tables.",
+   "fieldname": "line_table",
+   "fieldtype": "Data",
+   "label": "Line Item Table Fieldname"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "instructions_section",
+   "fieldtype": "Section Break",
+   "label": "Extraction Instructions"
+  },
+  {
+   "description": "Free-text guidance for the LLM: what this document looks like, how to read each field, units, date formats, edge cases, etc.",
+   "fieldname": "instructions",
+   "fieldtype": "Long Text",
+   "label": "Instructions"
+  },
+  {
+   "fieldname": "field_rules_section",
+   "fieldtype": "Section Break",
+   "label": "Field Rules"
+  },
+  {
+   "description": "Optional per-field rules. The target DocType's own field schema is always sent to the LLM; these add targeted guidance.",
+   "fieldname": "field_rules",
+   "fieldtype": "Table",
+   "label": "Field Rules",
+   "options": "Document Rule Book Field"
+  },
+  {
+   "fieldname": "tables_section",
+   "fieldtype": "Section Break",
+   "label": "Child Tables to Extract"
+  },
+  {
+   "description": "Child tables on the target DocType to extract (e.g. items). Empty = header-only. Supersedes the legacy single fieldname above.",
+   "fieldname": "tables",
+   "fieldtype": "Table",
+   "label": "Tables",
+   "options": "Document Rule Book Table"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "postprocess_section",
+   "fieldtype": "Section Break",
+   "label": "Post-processing (extension-specific)"
+  },
+  {
+   "default": "0",
+   "description": "If set, the doctype extension may collapse extracted rows into one common item (e.g. Purchase Invoice). General doctypes keep rows 1:1.",
+   "fieldname": "consolidate_lines",
+   "fieldtype": "Check",
+   "label": "Consolidate Lines into Common Item"
+  },
+  {
+   "depends_on": "eval:doc.consolidate_lines",
+   "description": "Item to consolidate all extracted lines into when consolidation is enabled.",
+   "fieldname": "common_item",
+   "fieldtype": "Link",
+   "label": "Common Item",
+   "options": "Item"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Rule Book",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Scanner User",
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "autoname": "field:item",
+ "creation": "2026-05-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "item",
+  "model",
+  "text_hash",
+  "dims",
+  "vector"
+ ],
+ "fields": [
+  {
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item",
+   "options": "Item",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "label": "Embedding Model",
+   "read_only": 1
+  },
+  {
+   "description": "Hash of the embedded text; used to detect when an item changed and the vector is stale.",
+   "fieldname": "text_hash",
+   "fieldtype": "Data",
+   "label": "Text Hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "dims",
+   "fieldtype": "Int",
+   "label": "Dimensions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "vector",
+   "fieldtype": "Code",
+   "label": "Vector (JSON)",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Item Embedding",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

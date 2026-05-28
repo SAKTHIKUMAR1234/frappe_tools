@@ -1,0 +1,175 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "DOCEXT-.#####",
+ "creation": "2026-05-25 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "target_doctype",
+  "status",
+  "created_document",
+  "model_used",
+  "line_table",
+  "column_break_meta",
+  "scanned_document",
+  "total_tokens",
+  "cost_usd",
+  "source_section",
+  "pages",
+  "fields_section",
+  "extracted_fields",
+  "lines_section",
+  "lines",
+  "error_section",
+  "error_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "target_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Target DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nExtracting\nReview\nCreated\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_document",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Created Document",
+   "options": "target_doctype",
+   "read_only": 1
+  },
+  {
+   "fieldname": "model_used",
+   "fieldtype": "Data",
+   "label": "Model Used",
+   "read_only": 1
+  },
+  {
+   "fieldname": "line_table",
+   "fieldtype": "Data",
+   "label": "Line Item Table",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "scanned_document",
+   "fieldtype": "Link",
+   "label": "Scanned Document",
+   "options": "Scanned Document",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_tokens",
+   "fieldtype": "Int",
+   "label": "Total Tokens",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cost_usd",
+   "fieldtype": "Float",
+   "label": "Cost (USD)",
+   "precision": "6",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Scanned Pages"
+  },
+  {
+   "fieldname": "pages",
+   "fieldtype": "Table",
+   "label": "Pages",
+   "options": "Document Extraction Page"
+  },
+  {
+   "fieldname": "fields_section",
+   "fieldtype": "Section Break",
+   "label": "Extracted Fields"
+  },
+  {
+   "fieldname": "extracted_fields",
+   "fieldtype": "Table",
+   "label": "Extracted Fields",
+   "options": "Document Extraction Field"
+  },
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Line Items"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Line Items",
+   "options": "Document Extraction Line"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "error_section",
+   "fieldtype": "Section Break",
+   "label": "Error Log"
+  },
+  {
+   "fieldname": "error_log",
+   "fieldtype": "Code",
+   "label": "Error Log",
+   "options": "Text",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-25 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Extraction",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Scanner User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
