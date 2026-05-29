@@ -83,7 +83,8 @@ app_license = "mit"
 # ------------
 
 # before_install = "frappe_tools.install.before_install"
-after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
+# DISABLED — see hotfix note below.
+# after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
 
 # Uninstallation
 # ------------
@@ -263,7 +264,15 @@ scheduler_events = {
     }
 }
 
-after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
+# HOTFIX 2026-05-29 — AI Bot Custom DocPerm rows were triggering Frappe's
+# wholesale-override rule on doctypes that already had any Custom DocPerm row
+# from other sources, suppressing standard DocPerm rows for other roles and
+# leaving users with read-only access on those doctypes. Auto-reseed is
+# disabled until the setup logic mirrors standard DocPerm into Custom DocPerm
+# the way Frappe's own add_permission / setup_custom_perms does. To re-enable
+# manually after the fix lands, call:
+#   frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions()
+# after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
 
 fixtures =[
         {
