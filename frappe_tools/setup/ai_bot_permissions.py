@@ -2,6 +2,7 @@ import frappe
 
 
 ROLE_NAME = "AI Bot"
+SETTINGS_DOCTYPE = "AI Bot Settings"
 BATCH_SIZE = 200
 
 # Read-style ptypes AI Bot is granted on every (doctype, permlevel) pair.
@@ -11,23 +12,33 @@ _AI_BOT_PTYPES = ("read", "select", "report", "print", "email", "export")
 
 
 def setup_ai_bot_permissions():
-	"""Ensure AI Bot has read access to every DocType, Report, and Page.
+	"""Re-seed AI Bot permissions every migrate.
 
-	DocType access is granted by inserting AI Bot rows into whichever permission
-	table the doctype is already using:
+	Run via the `after_migrate` hook. Each call:
 
-	- doctype has Custom DocPerm rows → write AI Bot row into Custom DocPerm.
-	- doctype has only standard DocPerm rows → write AI Bot row into DocPerm.
+	  1. Loads the user-curated 'protected doctypes' list from AI Bot Settings.
+	     Doctypes in that list are off-limits — neither the wipe nor the
+	     re-add touches them, so any manual customization on AI Bot rows for
+	     those doctypes survives migrations.
+	  2. Wipes every AI Bot row in DocPerm / Custom DocPerm whose `parent` is
+	     NOT in the protected list. This drops rows referencing deleted /
+	     renamed doctypes (and anything else AI-Bot-related left over from
+	     a previous run).
+	  3. Wipes every AI Bot row in Has Role for Report / Page parenttype.
+	     These get rebuilt below for whichever reports/pages currently exist.
+	  4. Adds AI Bot rows back for every current doctype / restricted report /
+	     restricted page, at every permlevel the doctype uses.
 
-	This matches Frappe's own convention (once a doctype gains a Custom DocPerm
-	row, its standard DocPerm rows are suppressed wholesale) and keeps the setup
-	strictly additive — no existing row is ever modified or moved.
-
-	Reports and Pages are handled separately via Has Role rows, since their
-	role gates live there rather than in DocPerm.
+	Custom DocPerm vs DocPerm: when a doctype already has any Custom DocPerm
+	row, AI Bot is added to Custom DocPerm too — otherwise its standard DocPerm
+	row would be suppressed by Frappe's wholesale-override rule. Doctypes with
+	only standard DocPerm rows get AI Bot in standard DocPerm so we don't
+	gratuitously trigger the override.
 	"""
 	ensure_role_exists()
-	setup_doctype_permissions()
+	protected = _get_protected_doctypes()
+	cleanup_ai_bot_rows(protected_doctypes=protected)
+	setup_doctype_permissions(protected_doctypes=protected)
 	setup_report_permissions()
 	setup_page_permissions()
 	frappe.clear_cache()
@@ -44,25 +55,64 @@ def ensure_role_exists():
 	frappe.db.commit()
 
 
+def _get_protected_doctypes():
+	"""Return the set of doctype names whose AI Bot rows must be left alone.
+
+	Defensive about the case where AI Bot Settings hasn't been migrated yet
+	(fresh install, first-time bootstrap) — returns an empty set silently
+	so the rest of the setup still runs.
+	"""
+	if not frappe.db.exists("DocType", SETTINGS_DOCTYPE):
+		return set()
+	try:
+		settings = frappe.get_single(SETTINGS_DOCTYPE)
+	except Exception:
+		return set()
+	return {row.doctype_name for row in (settings.protected_doctypes or []) if row.doctype_name}
+
+
+# ---------------- Cleanup ----------------------------------------------------
+
+
+def cleanup_ai_bot_rows(protected_doctypes):
+	"""Drop every AI Bot row from DocPerm / Custom DocPerm (except protected
+	doctypes) and from Has Role for Reports / Pages.
+
+	The Has Role wipe is unconditional — Reports and Pages aren't bound to
+	user customizations the same way doctype permissions are, and a stale
+	Has Role row for a deleted Report would block migrate the same way a
+	stale DocPerm does.
+	"""
+	doctype_filters = {"role": ROLE_NAME}
+	if protected_doctypes:
+		doctype_filters["parent"] = ("not in", list(protected_doctypes))
+
+	frappe.db.delete("DocPerm", doctype_filters)
+	frappe.db.delete("Custom DocPerm", doctype_filters)
+
+	frappe.db.delete(
+		"Has Role",
+		{"role": ROLE_NAME, "parenttype": ("in", ["Report", "Page"])},
+	)
+	frappe.db.commit()
+
+
 # ---------------- DocType perms ----------------------------------------------
 
 
-def setup_doctype_permissions():
+def setup_doctype_permissions(protected_doctypes):
 	"""Add AI Bot read rows to every DocType at every permlevel it uses.
 
-	For each doctype we:
+	For each doctype (skipping those in `protected_doctypes`):
 	  1. Pick the target table — Custom DocPerm if the doctype already has any
-	     Custom DocPerm rows, otherwise standard DocPerm. This mirrors Frappe's
-	     own override rule (any Custom DocPerm row on a doctype suppresses every
-	     standard DocPerm row), so we always land in the active permission set.
+	     Custom DocPerm rows, otherwise standard DocPerm.
 	  2. Collect every distinct permlevel present on the doctype's fields plus
-	     Custom Fields, including 0. This ensures permlevel-1/2/… fields become
-	     readable via Meta.get_permlevel_access.
-	  3. Skip (doctype, permlevel) pairs that already have an AI Bot row in the
-	     chosen table, so re-runs are no-ops.
+	     Custom Fields (always including 0).
+	  3. Insert one AI Bot row per permlevel.
 
-	Wired via `after_migrate`, so bench migrate will re-add any row that gets
-	wiped when a stock DocType's permissions are re-synced from JSON.
+	After `cleanup_ai_bot_rows()` has run, there are no AI Bot rows on any
+	non-protected doctype, so the inner existence-check is mainly belt-and-
+	braces for re-entrancy.
 	"""
 	doctypes = frappe.get_all("DocType", pluck="name")
 
@@ -74,6 +124,9 @@ def setup_doctype_permissions():
 
 	added = 0
 	for doctype in doctypes:
+		if doctype in protected_doctypes:
+			continue
+
 		uses_custom = doctype in doctypes_with_custom
 		target = "Custom DocPerm" if uses_custom else "DocPerm"
 		existing = existing_in_custom if uses_custom else existing_in_standard
@@ -125,8 +178,7 @@ def _collect_permlevels(doctype):
 
 def _insert_ai_bot_row(table, doctype, permlevel):
 	"""Add one AI Bot row at the given permlevel into `table` (DocPerm or
-	Custom DocPerm). Both doctypes have identical schemas, so one helper covers
-	both cases — only the parent doctype name differs.
+	Custom DocPerm). Both have identical schemas, so one helper covers both.
 	"""
 	doc = frappe.new_doc(table)
 	doc.parent = doctype
@@ -144,21 +196,12 @@ def _insert_ai_bot_row(table, doctype, permlevel):
 
 
 def setup_report_permissions():
-	"""Add AI Bot to the Has Role table of every role-restricted Report.
-
-	Reports with no roles listed are open to everyone, so we skip those.
-	Reports that restrict by role would otherwise lock AI Bot out even though
-	the doctype-level row gives it `report` access.
-	"""
+	"""Add AI Bot to the Has Role table of every role-restricted Report."""
 	_add_role_to_has_role(parenttype="Report")
 
 
 def setup_page_permissions():
-	"""Add AI Bot to the Has Role table of every role-restricted Page.
-
-	Same shape as reports — Page.is_permitted returns True when no roles are
-	listed, so only restricted pages need the entry.
-	"""
+	"""Add AI Bot to the Has Role table of every role-restricted Page."""
 	_add_role_to_has_role(parenttype="Page")
 
 

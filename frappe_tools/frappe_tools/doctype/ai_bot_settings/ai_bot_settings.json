@@ -1,0 +1,50 @@
+{
+ "actions": [],
+ "creation": "2026-05-28 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_info",
+  "protected_doctypes"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_info",
+   "fieldtype": "Section Break",
+   "label": "Protected DocTypes",
+   "description": "Every bench migrate wipes all AI Bot DocPerm / Custom DocPerm rows and re-adds them fresh, so rows pointing at deleted doctypes don't linger. DocTypes listed below are SKIPPED by both the wipe and the re-add — their AI Bot rows are left exactly as you customized them."
+  },
+  {
+   "fieldname": "protected_doctypes",
+   "fieldtype": "Table",
+   "label": "Protected DocTypes",
+   "options": "AI Bot Protected DocType"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-05-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "AI Bot Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
