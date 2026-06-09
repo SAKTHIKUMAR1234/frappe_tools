@@ -54,14 +54,19 @@
                     <span class="doc-info-bar-sep">&middot;</span>
                     <span class="doc-info-bar-value">{{ localDocname }}</span>
                 </div>
+                <label class="auto-capture-toggle" title="When ON, each scan drops straight into a new page — no carousel, no dragging">
+                    <input type="checkbox" v-model="autoCapture" />
+                    <span class="auto-capture-slider"></span>
+                    <span class="auto-capture-label">Auto-capture</span>
+                </label>
                 <button class="doc-info-bar-btn" @click="startNewScan">
                     Change Document
                 </button>
             </div>
             <div class="main_container">
-                <UnsedImagesCarrosal style="width : 60%" :images="dragStore.imagesList" @remove="removeImage"
+                <UnsedImagesCarrosal v-if="!autoCapture" style="width : 60%" :images="dragStore.imagesList" @remove="removeImage"
                     @update:images="val => imagesList = val" />
-                <MainLayoutHandler style="width : 40%" :is_new="localIsNew" :document_name="localDocname"
+                <MainLayoutHandler ref="layoutHandlerRef" :style="{ width: autoCapture ? '70%' : '40%' }" :is_new="localIsNew" :document_name="localDocname"
                     :scan_name="props.scan_name" :doctype="localDoctype" @newScan="startNewScan"
                     @created="localIsNew = false" />
                 <DocumentListViewer v-if="localDocname && localDoctype"
@@ -111,6 +116,8 @@ const qrcodeCanvas = ref(null);
 const origin = window.location.origin;
 const isScanning = ref(false);
 const scanMode = ref(null);
+const autoCapture = ref(true);
+const layoutHandlerRef = ref(null);
 
 const props = defineProps({
     is_new: { type: Boolean, default: true },
@@ -318,10 +325,24 @@ function handleDataMessage(e) {
 
             base64 = JSON.parse(base64).data;
 
-            dragStore.setImagesDetails([
-                ...dragStore.imagesList,
-                `data:image/jpeg;base64,${base64}`
-            ]);
+            const dataUrl = `data:image/jpeg;base64,${base64}`;
+
+            if (autoCapture.value && scanMode.value === 'template') {
+                // Auto-capture: skip the carousel, append straight into the layout.
+                const placed = dragStore.appendScannedPage(dataUrl);
+                if (placed) {
+                    nextTick(scrollNewestPageIntoView);
+                } else {
+                    // No layout/section selected yet — fall back to carousel.
+                    dragStore.setImagesDetails([...dragStore.imagesList, dataUrl]);
+                    frappe.show_alert(
+                        { message: __('Select a Document Layout first — scan kept in Unused Scans'), indicator: 'orange' },
+                        7
+                    );
+                }
+            } else {
+                dragStore.setImagesDetails([...dragStore.imagesList, dataUrl]);
+            }
 
             notifySuccess();
             playBeep();
@@ -816,16 +837,45 @@ const exitExtract = () => {
     }
 }
 
-const handleCtrlS = (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "s") {
+function scrollNewestPageIntoView() {
+    const cards = document.querySelectorAll('.main-content .doc-card');
+    if (cards.length) {
+        cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+// Keyboard-first controls (capture phase so they win over the browser/Frappe
+// and fire regardless of which element holds focus):
+//   Ctrl/Cmd+S      → Scan (capture next page)
+//   Ctrl/Cmd+Enter  → Save (Create/Update the scanned document)
+//   Esc             → exit extract mode
+const handleKeydown = (event) => {
+    const key = (event.key || '').toLowerCase();
+
+    if ((event.ctrlKey || event.metaKey) && key === 's') {
         event.preventDefault();
+        event.stopPropagation();
         triggerMobileScanner();
+        return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && key === 'enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (scanMode.value === 'template' && layoutHandlerRef.value?.save) {
+            layoutHandlerRef.value.save();
+        }
+        return;
+    }
+
+    if (key === 'escape' && scanMode.value === 'extract') {
+        exitExtract();
     }
 };
 
 onMounted(async () => {
     sessionStore.resetSession();
-    window.addEventListener("keydown", handleCtrlS);
+    window.addEventListener("keydown", handleKeydown, true);
     sessionStore.createSession(sessionStore.sessionId);
 
     await sessionStore.generatePin();
@@ -851,7 +901,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-    window.removeEventListener("keydown", handleCtrlS);
+    window.removeEventListener("keydown", handleKeydown, true);
     updateRealtimeListener(null);
     destroyPeer()
 })
@@ -1054,6 +1104,60 @@ defineExpose({ handleSignals })
 .doc-info-bar-btn:hover {
     background: #f8fafc;
     border-color: #cbd5e1;
+}
+
+/* ── Auto-capture Toggle ── */
+.auto-capture-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 4px 0 auto;
+    cursor: pointer;
+    user-select: none;
+}
+
+.auto-capture-toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.auto-capture-slider {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    border-radius: 999px;
+    background: #cbd5e1;
+    transition: background 0.15s ease;
+    flex-shrink: 0;
+}
+
+.auto-capture-slider::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    transition: transform 0.15s ease;
+}
+
+.auto-capture-toggle input:checked + .auto-capture-slider {
+    background: #4f46e5;
+}
+
+.auto-capture-toggle input:checked + .auto-capture-slider::after {
+    transform: translateX(16px);
+}
+
+.auto-capture-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
 }
 
 /* ── Main Container ── */
