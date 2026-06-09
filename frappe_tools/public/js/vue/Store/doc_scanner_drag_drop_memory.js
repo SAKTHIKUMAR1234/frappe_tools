@@ -104,6 +104,35 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
       console.log(details);
     },
 
+    // Auto-capture: drop a freshly-scanned image straight into the layout as a
+    // new page in the first section, bypassing the Unused Scans carousel.
+    // Returns false when there is no layout/section to append into.
+    appendScannedPage(dataUrl) {
+      const details = this.document_scanner_details;
+      if (!details || !details.sections) return false;
+      const sectionKeys = Object.keys(details.sections);
+      if (!sectionKeys.length) return false;
+
+      // Prefer a Series section (renders every page); else fall back to the first.
+      const targetKey =
+        sectionKeys.find(
+          (k) => details.sections[k].section_type === "Series Vertical"
+        ) || sectionKeys[0];
+      const images = details.sections[targetKey].images;
+
+      let maxPage = 0;
+      for (const img of images) {
+        if (img.page_no > maxPage) maxPage = img.page_no;
+      }
+
+      images.push({
+        page_no: maxPage + 1,
+        page_type: "Front",
+        attachment: dataUrl,
+      });
+      return true;
+    },
+
     async setImagesDetails(images) {
       this.imagesList = [];
       for (const e of images) {

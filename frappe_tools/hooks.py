@@ -83,8 +83,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "frappe_tools.install.before_install"
-# DISABLED — see hotfix note below.
-# after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
+after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
 
 # Uninstallation
 # ------------
@@ -264,15 +263,20 @@ scheduler_events = {
     }
 }
 
-# HOTFIX 2026-05-29 — AI Bot Custom DocPerm rows were triggering Frappe's
-# wholesale-override rule on doctypes that already had any Custom DocPerm row
-# from other sources, suppressing standard DocPerm rows for other roles and
-# leaving users with read-only access on those doctypes. Auto-reseed is
-# disabled until the setup logic mirrors standard DocPerm into Custom DocPerm
-# the way Frappe's own add_permission / setup_custom_perms does. To re-enable
-# manually after the fix lands, call:
-#   frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions()
-# after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
+# 2026-05-29 outage: AI Bot Custom DocPerm rows triggered Frappe's
+# wholesale-override rule (any Custom DocPerm row on a doctype makes Frappe
+# ignore that doctype's standard DocPerm entirely), suppressing other roles'
+# write/create/delete and leaving users with read-only access.
+# 2026-06-07 fix: setup_doctype_permissions now mirrors every standard DocPerm
+# row into Custom DocPerm BEFORE adding AI Bot (see
+# ai_bot_permissions._mirror_standard_into_custom), exactly as Frappe's own
+# setup_custom_perms does — so seeding is additive and can't revoke any role's
+# access. Verified: frappe_tools.setup.verify_perm_safety.verify reported ZERO
+# regressions across 2491 granted perms on a real-data copy. Auto-reseed
+# re-enabled. NOTE: on a live site, run `bench restart` after migrate — perms
+# are cached per gunicorn worker, so the DB change isn't visible until workers
+# recycle.
+after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
 
 fixtures =[
         {
