@@ -131,6 +131,16 @@ def setup_doctype_permissions(protected_doctypes):
 		target = "Custom DocPerm" if uses_custom else "DocPerm"
 		existing = existing_in_custom if uses_custom else existing_in_standard
 
+		# Custom DocPerm wholesale-overrides standard DocPerm: once a doctype has
+		# any Custom DocPerm row, Frappe ignores its standard DocPerm entirely.
+		# Before adding AI Bot to Custom DocPerm we therefore mirror every
+		# standard DocPerm row that isn't already there, so no other role silently
+		# loses access (this is what Frappe's own setup_custom_perms does upfront).
+		# Without it, adding AI Bot to a doctype whose Custom DocPerm is an
+		# incomplete mirror compounds the 2026-05-29 lockout.
+		if uses_custom:
+			_mirror_standard_into_custom(doctype)
+
 		for level in _collect_permlevels(doctype):
 			if (doctype, level) in existing:
 				continue
@@ -142,6 +152,63 @@ def setup_doctype_permissions(protected_doctypes):
 
 	if added:
 		frappe.db.commit()
+
+
+# Candidate permission flag columns; the live set is resolved against the
+# actual schema (varies by Frappe version) so we never query/copy a column
+# that doesn't exist on this site.
+_CANDIDATE_PERM_FIELDS = (
+	"select", "read", "write", "create", "delete", "submit", "cancel",
+	"amend", "report", "export", "import", "print", "email", "share",
+	"set_user_permissions", "if_owner",
+)
+
+
+def _perm_fields():
+	"""Permission columns present in both DocPerm and Custom DocPerm here."""
+	shared = set(frappe.db.get_table_columns("DocPerm")) & set(
+		frappe.db.get_table_columns("Custom DocPerm")
+	)
+	return [f for f in _CANDIDATE_PERM_FIELDS if f in shared]
+
+
+def _mirror_standard_into_custom(doctype):
+	"""Copy any standard DocPerm (role, permlevel) row missing from this
+	doctype's Custom DocPerm, so its override set is a complete mirror.
+
+	Additive only — never edits or deletes an existing Custom DocPerm row, so
+	deliberate customizations survive. AI Bot is skipped here; it's added
+	separately by the caller at the permlevels it needs.
+	"""
+	present = {
+		(r.role, int(r.permlevel or 0))
+		for r in frappe.get_all(
+			"Custom DocPerm",
+			filters={"parent": doctype},
+			fields=["role", "permlevel"],
+		)
+	}
+	perm_fields = _perm_fields()
+	std_rows = frappe.get_all(
+		"DocPerm",
+		filters={"parent": doctype},
+		fields=["role", "permlevel", *perm_fields],
+	)
+	for row in std_rows:
+		if row.role == ROLE_NAME:
+			continue
+		if (row.role, int(row.permlevel or 0)) in present:
+			continue
+		doc = frappe.new_doc("Custom DocPerm")
+		doc.parent = doctype
+		doc.parenttype = "DocType"
+		doc.parentfield = "permissions"
+		doc.role = row.role
+		doc.permlevel = int(row.permlevel or 0)
+		for ptype in perm_fields:
+			if hasattr(doc, ptype):
+				setattr(doc, ptype, row.get(ptype) or 0)
+		doc.db_insert()
 
 
 def _existing_ai_bot_rows(table):
