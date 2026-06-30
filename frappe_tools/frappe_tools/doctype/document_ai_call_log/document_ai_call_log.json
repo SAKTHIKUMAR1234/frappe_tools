@@ -20,6 +20,8 @@
   "payload_section",
   "request_payload",
   "response_payload",
+  "raw_response",
+  "finish_reason",
   "error_message"
  ],
  "fields": [
@@ -124,6 +126,18 @@
    "read_only": 1
   },
   {
+   "fieldname": "raw_response",
+   "fieldtype": "Code",
+   "label": "Raw Model Response",
+   "read_only": 1
+  },
+  {
+   "fieldname": "finish_reason",
+   "fieldtype": "Data",
+   "label": "Finish Reason",
+   "read_only": 1
+  },
+  {
    "fieldname": "error_message",
    "fieldtype": "Small Text",
    "label": "Error Message",
@@ -132,7 +146,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-25 10:00:00.000000",
+ "modified": "2026-06-18 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document AI Call Log",

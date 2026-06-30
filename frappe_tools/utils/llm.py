@@ -95,6 +95,8 @@ def _attempt_call(body, headers, timeout, model, extraction, target_doctype):
 	result = {}
 	usage = {}
 	parsed = None
+	raw_text = ""
+	finish_reason = None
 
 	try:
 		resp = requests.post(OPENROUTER_URL, headers=headers, json=body, timeout=timeout)
@@ -110,10 +112,22 @@ def _attempt_call(body, headers, timeout, model, extraction, target_doctype):
 
 		usage = (result.get("usage") or {}) if isinstance(result, dict) else {}
 		choices = result.get("choices") or []
-		raw_text = (choices[0].get("message", {}).get("content") if choices else "") or ""
+		first_choice = choices[0] if choices else {}
+		raw_text = (first_choice.get("message", {}).get("content") or "")
+		finish_reason = first_choice.get("finish_reason")
 		parsed = safe_json_loads(raw_text)
 		if parsed is None:
-			raise ValueError("could not parse JSON from model response")
+			# Surface WHY it failed: truncation (hit max_tokens) is the usual
+			# culprit and is deterministic across retries. Include a snippet of
+			# the raw text so the error alone is diagnostic.
+			if finish_reason == "length":
+				hint = _(" — response was truncated (finish_reason=length); raise 'Max Tokens' in Document Extraction Settings")
+			else:
+				hint = ""
+			snippet = raw_text[:200] if raw_text else "<empty response>"
+			raise ValueError(
+				_("could not parse JSON from model response{0}. Raw begins: {1}").format(hint, snippet)
+			)
 	except requests.Timeout as exc:
 		status, error = "Timeout", str(exc)
 	except requests.HTTPError as exc:
@@ -124,7 +138,7 @@ def _attempt_call(body, headers, timeout, model, extraction, target_doctype):
 		error = _extract_api_error(result) or str(exc)
 
 	latency_ms = int((time.monotonic() - started) * 1000)
-	_log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error)
+	_log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text, finish_reason)
 
 	if status == "Success" and parsed is not None:
 		return {"ok": True, "data": parsed, "usage": usage, "latency_ms": latency_ms}
@@ -141,7 +155,7 @@ def _extract_api_error(result):
 	return None
 
 
-def _log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error):
+def _log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text=None, finish_reason=None):
 	"""Persist a Document AI Call Log row. Never raises into the caller."""
 	try:
 		log = frappe.new_doc(CALL_LOG_DOCTYPE)
@@ -158,6 +172,8 @@ def _log_call(extraction, target_doctype, model, status, http_status, latency_ms
 		log.cost_usd = flt((usage or {}).get("cost"))
 		log.request_payload = frappe.as_json(_redact_images(body))
 		log.response_payload = frappe.as_json(result)[:140000]
+		log.raw_response = (raw_text or "")[:140000]
+		log.finish_reason = finish_reason
 		log.error_message = (error or "")[:500]
 		log.flags.ignore_permissions = True
 		log.insert(ignore_permissions=True)
