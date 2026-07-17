@@ -1,0 +1,188 @@
+{
+ "actions": [],
+ "autoname": "format:I2A-RUN-{YYYY}-{#####}",
+ "creation": "2026-07-03 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "action",
+  "status",
+  "mode",
+  "column_break_head",
+  "reference_doctype",
+  "reference_name",
+  "reference_detail",
+  "result_section",
+  "rounds_used",
+  "total_tokens",
+  "total_cost_usd",
+  "cost_estimated",
+  "column_break_totals",
+  "started_at",
+  "ended_at",
+  "error_message",
+  "trace_section",
+  "result_json",
+  "feedback_json",
+  "verdict_json",
+  "steps_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "action",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Action",
+   "options": "I2A Action",
+   "reqd": 1
+  },
+  {
+   "default": "Running",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Running\nCompleted\nNeeds Review\nFailed"
+  },
+  {
+   "description": "Effective mode after per-run override.",
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Mode",
+   "options": "Manual\nAutomated"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Reference DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Name",
+   "options": "reference_doctype"
+  },
+  {
+   "description": "Child-row or sub-item identifier within the reference document (e.g. the LR Processing Entry row name).",
+   "fieldname": "reference_detail",
+   "fieldtype": "Data",
+   "label": "Reference Detail"
+  },
+  {
+   "fieldname": "result_section",
+   "fieldtype": "Section Break",
+   "label": "Result"
+  },
+  {
+   "fieldname": "rounds_used",
+   "fieldtype": "Int",
+   "label": "Rounds Used"
+  },
+  {
+   "fieldname": "total_tokens",
+   "fieldtype": "Int",
+   "label": "Total Tokens"
+  },
+  {
+   "fieldname": "total_cost_usd",
+   "fieldtype": "Float",
+   "label": "Total Cost (USD)",
+   "precision": "6"
+  },
+  {
+   "default": "0",
+   "description": "Set when any call's cost is rate-card-estimated rather than provider-reported.",
+   "fieldname": "cost_estimated",
+   "fieldtype": "Check",
+   "label": "Cost Estimated"
+  },
+  {
+   "fieldname": "column_break_totals",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At"
+  },
+  {
+   "fieldname": "ended_at",
+   "fieldtype": "Datetime",
+   "label": "Ended At"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "trace_section",
+   "fieldtype": "Section Break",
+   "label": "Trace"
+  },
+  {
+   "description": "Reviewer's per-field correct/wrong verdicts from the review screen. Ground truth for audit and future distillation.",
+   "fieldname": "feedback_json",
+   "fieldtype": "Code",
+   "label": "Reviewer Feedback (JSON)",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "description": "Per-field verdicts: pass/deficiencies/final status, cross_check result, repaired flags.",
+   "fieldname": "verdict_json",
+   "fieldtype": "Code",
+   "label": "Verdict JSON",
+   "options": "JSON"
+  },
+  {
+   "description": "Ordered step trace: routing (incl. fallbacks), calls, dropped keys, round fingerprints.",
+   "fieldname": "steps_json",
+   "fieldtype": "Code",
+   "label": "Steps JSON",
+   "options": "JSON"
+  },
+  {
+   "description": "Engine result the review screen renders: extracted fields (+bboxes), match/agent outcome, input file urls. Written at finalize.",
+   "fieldname": "result_json",
+   "fieldtype": "Code",
+   "label": "Result (JSON)",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-15 21:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "I2A Run",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

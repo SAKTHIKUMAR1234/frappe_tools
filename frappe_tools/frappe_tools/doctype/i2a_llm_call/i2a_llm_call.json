@@ -1,0 +1,172 @@
+{
+ "actions": [],
+ "autoname": "format:I2A-CALL-{YYYY}-{#######}",
+ "creation": "2026-07-03 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "run",
+  "action",
+  "ai_model",
+  "provider",
+  "purpose",
+  "column_break_head",
+  "status",
+  "http_status",
+  "latency_ms",
+  "tokens_section",
+  "prompt_tokens",
+  "completion_tokens",
+  "total_tokens",
+  "column_break_tokens",
+  "cost_usd",
+  "cost_estimated",
+  "payload_section",
+  "request_payload",
+  "response_payload",
+  "error_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "run",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Run",
+   "options": "I2A Run"
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Action",
+   "options": "I2A Action"
+  },
+  {
+   "fieldname": "ai_model",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "AI Model",
+   "options": "AI Model"
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider"
+  },
+  {
+   "description": "Which engine step made this call.",
+   "fieldname": "purpose",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Purpose",
+   "options": "route\nextract\nverify\nrepair"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Success\nError\nTimeout"
+  },
+  {
+   "fieldname": "http_status",
+   "fieldtype": "Int",
+   "label": "HTTP Status"
+  },
+  {
+   "fieldname": "latency_ms",
+   "fieldtype": "Int",
+   "label": "Latency (ms)"
+  },
+  {
+   "fieldname": "tokens_section",
+   "fieldtype": "Section Break",
+   "label": "Usage"
+  },
+  {
+   "fieldname": "prompt_tokens",
+   "fieldtype": "Int",
+   "label": "Prompt Tokens"
+  },
+  {
+   "fieldname": "completion_tokens",
+   "fieldtype": "Int",
+   "label": "Completion Tokens"
+  },
+  {
+   "fieldname": "total_tokens",
+   "fieldtype": "Int",
+   "label": "Total Tokens"
+  },
+  {
+   "fieldname": "column_break_tokens",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cost_usd",
+   "fieldtype": "Float",
+   "label": "Cost (USD)",
+   "precision": "6"
+  },
+  {
+   "default": "0",
+   "description": "Cost is rate-card-estimated (provider did not report it, or the call failed after being billed).",
+   "fieldname": "cost_estimated",
+   "fieldtype": "Check",
+   "label": "Cost Estimated"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Payloads"
+  },
+  {
+   "description": "Image data URLs are redacted.",
+   "fieldname": "request_payload",
+   "fieldtype": "Long Text",
+   "label": "Request Payload"
+  },
+  {
+   "fieldname": "response_payload",
+   "fieldtype": "Long Text",
+   "label": "Response Payload"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message"
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-03 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "I2A LLM Call",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

@@ -1,0 +1,176 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:model_label",
+ "creation": "2026-07-03 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "model_label",
+  "enabled",
+  "provider",
+  "model_id",
+  "column_break_main",
+  "auth_type",
+  "api_key",
+  "api_secret",
+  "base_url",
+  "capabilities_section",
+  "supports_vision",
+  "supports_json_mode",
+  "column_break_caps",
+  "max_tokens",
+  "temperature",
+  "cost_section",
+  "cost_per_m_input",
+  "cost_per_m_output",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "model_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Model Label",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "OpenRouter",
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Provider",
+   "options": "OpenRouter\nAnthropic\nOpenAI\nCustom",
+   "reqd": 1
+  },
+  {
+   "description": "Provider's model identifier, e.g. google/gemini-2.5-flash",
+   "fieldname": "model_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Model ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "API Key",
+   "description": "How this model is authenticated — defines which credential fields apply.",
+   "fieldname": "auth_type",
+   "fieldtype": "Select",
+   "label": "Auth Type",
+   "options": "API Key\nAPI Key + Secret\nToken"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Key / Token"
+  },
+  {
+   "depends_on": "eval:doc.auth_type=='API Key + Secret'",
+   "fieldname": "api_secret",
+   "fieldtype": "Password",
+   "label": "API Secret"
+  },
+  {
+   "description": "Optional endpoint override. Leave empty for the provider default.",
+   "fieldname": "base_url",
+   "fieldtype": "Data",
+   "label": "Base URL"
+  },
+  {
+   "fieldname": "capabilities_section",
+   "fieldtype": "Section Break",
+   "label": "Capabilities & Defaults"
+  },
+  {
+   "default": "0",
+   "description": "Model can read images. Hard routing filter — image actions only see vision models.",
+   "fieldname": "supports_vision",
+   "fieldtype": "Check",
+   "label": "Supports Vision"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_json_mode",
+   "fieldtype": "Check",
+   "label": "Supports JSON Mode"
+  },
+  {
+   "fieldname": "column_break_caps",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "8192",
+   "description": "Floor of 8192 recommended — thinking models spend hidden reasoning tokens from the same budget.",
+   "fieldname": "max_tokens",
+   "fieldtype": "Int",
+   "label": "Max Tokens"
+  },
+  {
+   "default": "0",
+   "fieldname": "temperature",
+   "fieldtype": "Float",
+   "label": "Temperature",
+   "precision": "2"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "cost_section",
+   "fieldtype": "Section Break",
+   "label": "Cost"
+  },
+  {
+   "description": "USD per 1M input tokens — used for cost accounting when the provider doesn't report cost.",
+   "fieldname": "cost_per_m_input",
+   "fieldtype": "Float",
+   "label": "Cost / 1M Input Tokens (USD)",
+   "precision": "6"
+  },
+  {
+   "fieldname": "cost_per_m_output",
+   "fieldtype": "Float",
+   "label": "Cost / 1M Output Tokens (USD)",
+   "precision": "6"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-03 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "AI Model",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

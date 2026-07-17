@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "creation": "2026-07-03 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "ai_model",
+  "remarks",
+  "is_orchestrator",
+  "is_verifier"
+ ],
+ "fields": [
+  {
+   "fieldname": "ai_model",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "AI Model",
+   "options": "AI Model",
+   "reqd": 1
+  },
+  {
+   "description": "Plain English, mandatory — the orchestrator reads this to decide which model to use. e.g. \"Good at images — use for extraction\", \"Fast and cheap — use for verification\".",
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Remarks",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "The main model that orchestrates: picks which model handles each step. Exactly one per action.",
+   "fieldname": "is_orchestrator",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Orchestrator"
+  },
+  {
+   "default": "0",
+   "description": "Preferred verifier. At most one per action. If unset, the engine falls back deterministically.",
+   "fieldname": "is_verifier",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Verifier"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-03 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "I2A Action Model",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
