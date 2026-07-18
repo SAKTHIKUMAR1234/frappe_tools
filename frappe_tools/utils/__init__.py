@@ -1,14 +1,5 @@
-import mimetypes
-from copy import copy
-
 import frappe
-from frappe.utils.file_manager import (
-    check_max_file_size,
-    get_content_hash,
-    get_file_name,
-    save_file_on_filesystem,
-)
-from frappe.utils import call_hook_method, get_hook_method
+
 
 def save_file_always_new(
     fname,
@@ -19,34 +10,28 @@ def save_file_always_new(
     is_private=0,
     df=None,
 ):
-    file_size = check_max_file_size(content)
-    content_hash = get_content_hash(content)
-    content_type = mimetypes.guess_type(fname)[0]
-    fname = get_file_name(fname, content_hash[-6:])
-    call_hook_method("before_write_file", file_size=file_size)
-    write_file_method = get_hook_method(
-        "write_file",
-        fallback=save_file_on_filesystem
-    )
-    file_data = write_file_method(
-        fname,
-        content,
-        content_type=content_type,
-        is_private=is_private
-    )
-    file_data = copy(file_data)
+    """Create a NEW File doc for `content`, never reusing an existing File row.
 
-    file_data.update({
+    Hands the bytes to the File controller and lets it perform the single write.
+    Writing the blob here first made File.before_insert write it a SECOND time
+    under a hash-suffixed name (its generate_file_name saw the path already
+    taken) and repoint file_url at that copy — orphaning the first blob, which
+    nothing then referenced and no sweep could ever reclaim.
+
+    Byte-identical content now shares one blob via core's dedup; the File doc is
+    still always new, which is what callers need.
+    """
+    file_doc = frappe.get_doc({
         "doctype": "File",
+        "file_name": fname,
+        "content": content,
+        "decode": False,
         "attached_to_doctype": dt,
         "attached_to_name": dn,
         "attached_to_field": df,
         "folder": folder,
-        "file_size": file_size,
-        "content_hash": content_hash,
         "is_private": is_private,
     })
-    file_doc = frappe.get_doc(file_data)
     file_doc.flags.ignore_permissions = True
     file_doc.insert()
 

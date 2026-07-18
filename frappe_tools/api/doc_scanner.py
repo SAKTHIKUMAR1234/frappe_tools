@@ -320,12 +320,12 @@ def upload_image(image_data):
 	if attachment:
 		if attachment.startswith("data:"):
 			# New base64 image - upload it
-			file_name = create_image_upload(
+			file_doc = create_image_upload(
 				attachment,
 				"Scanned Document Detail",
 				doc.name
 			)
-			doc.db_set("attachment", file_name)
+			doc.db_set("attachment", file_doc.file_url)
 		else:
 			# Existing file URL - set it directly without re-uploading
 			doc.db_set("attachment", attachment)
@@ -333,7 +333,7 @@ def upload_image(image_data):
 	return doc.name
 
 
-def create_image_upload(attach, doctype, docname):
+def create_image_upload(attach, doctype, docname, fieldname="attachment"):
 	if attach.startswith("data:"):
 		header, attach = attach.split(",", 1)
 		mime = header.split(";")[0].split(":")[1]
@@ -362,7 +362,7 @@ def create_image_upload(attach, doctype, docname):
 		fname=file_name,
 		content=content,
 		dt=doctype,
-		df="attachment",
+		df=fieldname,
 		dn=docname,
 		is_private=1,
 	)
@@ -376,7 +376,9 @@ def create_image_upload(attach, doctype, docname):
 	):
 		file_doc.db_set("custom_is_s3_uploaded", 1)
 
-	return file_doc.file_url
+	# Return the doc, not just the url: core dedup points several File rows at one
+	# file_url, so the url can't identify which File we just made.
+	return file_doc
 
 
 @frappe.whitelist()
@@ -448,33 +450,33 @@ def attach_image_to_field(doctype, docname, fieldname, image_data):
 	if not df or df.fieldtype not in ("Attach", "Attach Image"):
 		frappe.throw(f"Field '{fieldname}' is not a valid Attach or Attach Image field")
 
-	# Delete old file if replacing
+	# Delete the old file only if it is the File that owns THIS field — scoping by url
+	# alone can hit a File belonging to a different Attach field on the same doc, since
+	# core dedup shares one file_url across rows.
 	doc = frappe.get_doc(doctype, docname)
 	old_value = doc.get(fieldname)
 	if old_value:
 		old_file = frappe.db.get_value(
 			"File",
-			{"file_url": old_value, "attached_to_doctype": doctype, "attached_to_name": docname},
+			{
+				"file_url": old_value,
+				"attached_to_doctype": doctype,
+				"attached_to_name": docname,
+				"attached_to_field": fieldname,
+			},
 			"name",
 		)
 		if old_file:
 			frappe.delete_doc("File", old_file, ignore_permissions=True)
 
-	file_url = create_image_upload(image_data, doctype, docname)
-
-	# Set attached_to_field on the File document
-	file_doc_name = frappe.db.get_value(
-		"File", {"file_url": file_url, "attached_to_doctype": doctype, "attached_to_name": docname}
-	)
-	if file_doc_name:
-		frappe.db.set_value("File", file_doc_name, "attached_to_field", fieldname)
+	file_doc = create_image_upload(image_data, doctype, docname, fieldname=fieldname)
 
 	# Reload doc since old file delete may have cleared the field
 	doc.reload()
-	doc.set(fieldname, file_url)
+	doc.set(fieldname, file_doc.file_url)
 	doc.save()
 
-	return {"file_url": file_url}
+	return {"file_url": file_doc.file_url}
 
 
 def get_document_field_values(
