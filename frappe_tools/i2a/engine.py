@@ -133,9 +133,17 @@ def _run_inner(state, action, files, context):
 		# Round 0 audits every claim. Later rounds re-audit ONLY what the
 		# repair touched: untouched fields already passed the full pass, and
 		# the deterministic checks above still cover every field every round.
-		only = getattr(state, "last_repair_targets", None) if state.rounds else None
-		model_disagreements = _model_verify(state, action, verifier, verify_parts, fields, gctx, only=only)
-		deficiencies += model_disagreements
+		#
+		# skip_model_verify (config): omit the LLM re-read of the image entirely.
+		# For a trusted single-pass extractor the second-opinion isn't worth its
+		# cost (re-sending the image is the dominant token spend), and write
+		# safety does NOT rest on it — the deterministic corroboration gate
+		# guards every auto-apply regardless. Deterministic checks above still
+		# run every round.
+		if not cint(getattr(action, "skip_model_verify", 0)):
+			only = getattr(state, "last_repair_targets", None) if state.rounds else None
+			model_disagreements = _model_verify(state, action, verifier, verify_parts, fields, gctx, only=only)
+			deficiencies += model_disagreements
 
 		state.step(
 			"verify",
@@ -281,6 +289,13 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 		"fields": values,
 		"context": context or {},
 	}
+	# agent_text_only (config): the resolving "brain" runs on TEXT ONLY — it
+	# never carries the document image, so the matching loop costs a fraction of
+	# an image-bearing one. When it genuinely needs something the extraction did
+	# not capture, it calls ask_document, which the engine routes to the vision
+	# model on the image-bearing session (a cheap follow-up, image already
+	# cached). Off (default) → the brain continues the vision session as before.
+	text_only = cint(getattr(action, "agent_text_only", 0)) and "executor" in state.sessions
 	# Generic mechanics ONLY — what counts as sufficient evidence, and any
 	# domain wording, comes from the action's agent_instructions config.
 	system = verify._join(
@@ -290,20 +305,41 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 		"If a reference cannot be confidently resolved, do NOT apply a guess — use the tool that flags "
 		"it for human review instead. Every document ends by applying, flagging, or both (applied "
 		"references stay applied; flag covers the rest).",
+		("You CANNOT see the document image. When a value is missing, ambiguous, or you need to "
+			"re-read something from the document, call ask_document with a specific question — a vision "
+			"model that can see the image will answer." if text_only else None),
 		"Do NOT re-extract or repeat the fields. When finished, reply with ONE short plain-text "
 		"sentence describing what you did (which records you applied and on what evidence) and "
 		"make NO further tool call.",
 		(getattr(action, "agent_instructions", None) or None),
 	)
-	# Continue the executor's per-run session: the model already holds the
-	# document image + its own extraction in-context (prompt-cached), so the
-	# resolution directive rides as one text turn. Local copy — the tool loop
-	# appends its own messages without polluting the session.
-	messages = [
-		*state.sessions.get("executor", []),
-		{"role": "user", "content": verify._join(
-			system, "Extracted document fields:\n" + json.dumps(values, default=str, indent=1))},
-	]
+	if text_only:
+		# fresh text conversation — no image, not the vision session
+		specs = specs + [{
+			"type": "function",
+			"function": {
+				"name": "ask_document",
+				"description": "Ask the vision model a specific question about the document image "
+					"(e.g. 'what customer name is printed near the consignee box?'). Use when the "
+					"extracted fields are missing or unclear.",
+				"parameters": {"type": "object", "required": ["question"], "properties": {
+					"question": {"type": "string", "description": "A specific question about the document image"}}},
+			},
+		}]
+		messages = [
+			{"role": "system", "content": system},
+			{"role": "user", "content": "Extracted document fields:\n" + json.dumps(values, default=str, indent=1)},
+		]
+	else:
+		# Continue the executor's per-run session: the model already holds the
+		# document image + its own extraction in-context (prompt-cached), so the
+		# resolution directive rides as one text turn. Local copy — the tool loop
+		# appends its own messages without polluting the session.
+		messages = [
+			*state.sessions.get("executor", []),
+			{"role": "user", "content": verify._join(
+				system, "Extracted document fields:\n" + json.dumps(values, default=str, indent=1))},
+		]
 
 	calls_made = []
 	applied = False   # a finalizing write succeeded (e.g. apply_lr_to_invoice)
@@ -329,6 +365,21 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 			state.step("agent_done", summary=summary[:300], applied=applied, flagged=flagged)
 			break
 		for tc in tcs:
+			# ask_document: the text brain queries the vision model about the
+			# image. Routed to the executor's image-bearing session (cheap
+			# follow-up), never a catalog method — so it bypasses the tool gate.
+			if text_only and tc["name"] == "ask_document":
+				q = (tc.get("arguments") or {}).get("question") or ""
+				try:
+					ans = state.chat(executor, "ask_document", session="executor",
+						content="Answer this question about the document image ONLY, concisely: " + str(q)[:500])
+					result = {"answer": ans}
+				except providers.ProviderError as exc:
+					result = {"error": f"vision model unavailable: {str(exc)[:150]}"}
+				calls_made.append({"tool": "ask_document", "ok": "error" not in result})
+				messages.append({"role": "tool", "tool_call_id": tc.get("id"),
+					"content": json.dumps(result, default=str)[:4000]})
+				continue
 			tool_def = next((t for t in catalog if t["name"] == tc["name"]), {})
 			# Once an escalation landed, no further FINALIZING write may run in
 			# the same batch — a parallel [flag, apply] emission must not let the
