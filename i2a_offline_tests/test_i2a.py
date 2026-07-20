@@ -894,6 +894,121 @@ try:
 except ImportError:
 	print("  (PIL unavailable — real shrink checks skipped)")
 
+# ============ e2e: text-only brain + ask_document + data tools (no image)
+print("\n== e2e: agent_text_only brain talks to vision via ask_document ==")
+
+
+class ScriptedTools:
+    """Replaces providers.call_with_tools for the agentic phase. Each entry is
+    either a list of tool calls [{name, arguments}] or a final string."""
+
+    def __init__(self, script):
+        self.turns = list(script)
+        self.seen = []
+        self.i = 0
+
+    def __call__(self, ai_model, messages, specs, *, purpose="", run=None, action=None, max_tokens=None, tool_choice="auto"):
+        self.seen.append({"messages": list(messages), "specs": specs})
+        item = self.turns[self.i] if self.i < len(self.turns) else "done"
+        self.i += 1
+        if isinstance(item, str):
+            return {"message": {"role": "assistant", "content": item}, "tool_calls": [], "content": item}
+        tcs = [{"id": f"c{n}", "name": t["name"], "arguments": t.get("arguments", {})} for n, t in enumerate(item)]
+        return {"message": {"role": "assistant", "content": "", "tool_calls": tcs}, "tool_calls": tcs, "content": ""}
+
+
+# fake tool methods routed by path (image never reaches these — they're data)
+_brain_calls = []
+
+
+def _fn_series(**kw):
+    _brain_calls.append(("series", kw)); return {"series": [{"series": "INV2627-", "example": "INV2627-01477"}]}
+
+
+def _fn_search(**kw):
+    _brain_calls.append(("search", kw)); return [{"name": "INV2627-00007", "ewaybill": "999", "posting_date": "2026-06-01"}]
+
+
+def _fn_apply(**kw):
+    _brain_calls.append(("apply", kw)); return {"applied": True, "invoice": (tools.get_context() or {}).get("_x") or kw.get("sales_invoice"), "lr_number": "LR1"}
+
+
+_TOOLFNS = {"x.series": _fn_series, "x.search": _fn_search, "x.apply": _fn_apply}
+FRAPPE.get_attr = lambda path: _TOOLFNS.get(path, _probe)
+FRAPPE.whitelisted = [_fn_series, _fn_search, _fn_apply, _probe]
+FRAPPE.has_permission = lambda *a, **k: True
+
+setup_world()  # seeds Sales Invoice SI-0001 with ewaybill 123456789012
+_ba = FRAPPE.get_doc("I2A Action", "LR Extraction")
+_ba.agent_text_only = 1
+_ba.skip_model_verify = 1
+_ba.match_config = json.dumps({
+    "target_doctype": "Sales Invoice",
+    "corroborate": [{"target_field": "ewaybill", "from": "eway_bills", "match": "exact"}],
+})
+_ba.tools = json.dumps([
+    {"name": "get_naming_series", "method": "x.series", "kind": "read",
+     "description": "series", "parameters": {"type": "object", "properties": {}}},
+    {"name": "search_sales_invoices", "method": "x.search", "kind": "read",
+     "description": "search", "parameters": {"type": "object", "properties": {"filters": {"type": "array"}}}},
+    {"name": "apply_lr_to_invoice", "method": "x.apply", "kind": "write", "finalizes": True,
+     "corroborate": {"arg": "sales_invoice", "doctype": "Sales Invoice"},
+     "description": "apply", "parameters": {"type": "object", "properties": {"sales_invoice": {"type": "string"}}}},
+])
+
+_agent_script = [
+    [{"name": "get_naming_series", "arguments": {}}],
+    [{"name": "ask_document", "arguments": {"question": "what is the consignee?"}}],
+    [{"name": "search_sales_invoices", "arguments": {"filters": [["ewaybill", "=", "123456789012"]]}}],
+    [{"name": "apply_lr_to_invoice", "arguments": {"sales_invoice": "SI-0001"}}],
+    "applied to SI-0001 — exact e-way bill",
+]
+
+_st = ScriptedTools(_agent_script)
+_real_ct = providers.call_with_tools
+providers.call_with_tools = _st
+engine.providers.call_with_tools = _st
+# the deterministic corroboration gate re-reads the chosen SI; stub that lookup
+# (the gate itself is exercised in the _corroborate_write suite — here we just
+# need it to pass so the guarded apply proceeds and applied_targets records)
+_real_gv = FRAPPE.db.get_value
+FRAPPE.db.get_value = lambda dt, name, fields=None, as_dict=False, **kw: (
+    {"name": "SI-0001", "ewaybill": "123456789012"}
+    if dt == "Sales Invoice" and name == "SI-0001"
+    else _real_gv(dt, name, fields, as_dict=as_dict, **kw))
+_brain_calls.clear()
+try:
+    _bres, _bsm = run_engine({
+        "extract": [full_extraction()],
+        "ask_document": [{"answer": "MOHAN AGENCIES"}],
+    }, mode="Automated")
+finally:
+    providers.call_with_tools = _real_ct
+    engine.providers.call_with_tools = _real_ct
+    FRAPPE.db.get_value = _real_gv
+
+
+def _has_img(msgs):
+    for m in msgs:
+        c = m.get("content")
+        if isinstance(c, list) and any(isinstance(p, dict) and p.get("type") == "image_url" for p in c):
+            return True
+    return False
+
+
+check("brain ran (tool calls happened)", len(_st.seen) >= 1)
+check("brain's conversation carries NO image", not _has_img(_st.seen[0]["messages"]))
+check("ask_document tool offered to the brain",
+      any(s["function"]["name"] == "ask_document" for s in _st.seen[0]["specs"]))
+check("ask_document routed to the vision model", any(c["purpose"] == "ask_document" for c in _bsm.calls))
+check("ask_document rode the image-bearing executor session",
+      _has_img(next(c["messages"] for c in _bsm.calls if c["purpose"] == "ask_document")))
+check("data tools executed (series + search + apply)",
+      [c[0] for c in _brain_calls] == ["series", "search", "apply"])
+check("apply landed → run resolved/completed", _bres["status"] == "Completed", _bres.get("status"))
+check("applied_targets recorded", _bres.get("agent", {}).get("applied_targets") == ["SI-0001"])
+check("no verify call (skip_model_verify)", not any(c["purpose"] == "verify" for c in _bsm.calls))
+
 # ================================ e2e: skip_model_verify (cost control)
 print("\n== e2e: skip_model_verify omits the LLM re-read ==")
 setup_world()
