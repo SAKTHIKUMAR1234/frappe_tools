@@ -1,0 +1,258 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:action_name",
+ "creation": "2026-07-03 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "action_name",
+  "enabled",
+  "mode",
+  "column_break_head",
+  "purpose",
+  "config_section",
+  "instructions",
+  "knowledge",
+  "rules",
+  "request_notes",
+  "use_llm_request_notes",
+  "grounding_section",
+  "use_ocr_anchored_repair",
+  "use_crop_back_check",
+  "column_break_grounding",
+  "use_verify_crops",
+  "use_bbox_snap",
+  "schema_section",
+  "output_schema",
+  "match_section",
+  "match_config",
+  "tools_section",
+  "tools",
+  "agent_instructions",
+  "budget_section",
+  "max_rounds",
+  "max_calls_per_run",
+  "column_break_budget",
+  "run_seconds_budget",
+  "models_section",
+  "models"
+ ],
+ "fields": [
+  {
+   "fieldname": "action_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Action Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "Manual",
+   "description": "Automated: fields passing every deterministic check AND the verify-model pass are auto-approved. Manual: everything lands Pending for human review. Callers may override per run.",
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Default Mode",
+   "options": "Manual\nAutomated"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "What this action does \u2014 shown to humans and to the orchestrator model.",
+   "fieldname": "purpose",
+   "fieldtype": "Small Text",
+   "label": "Purpose"
+  },
+  {
+   "fieldname": "config_section",
+   "fieldtype": "Section Break",
+   "label": "Brain Configuration (UI-owned \u2014 never hardcoded)"
+  },
+  {
+   "description": "The task prompt sent to the executor model. Edit freely \u2014 no code change needed.",
+   "fieldname": "instructions",
+   "fieldtype": "Long Text",
+   "label": "Instructions"
+  },
+  {
+   "description": "Domain knowledge injected into the prompt (formats, business facts, edge cases).",
+   "fieldname": "knowledge",
+   "fieldtype": "Long Text",
+   "label": "Knowledge"
+  },
+  {
+   "description": "Plain-English verification rules the verify model applies when comparing the extraction against the source.",
+   "fieldname": "rules",
+   "fieldtype": "Long Text",
+   "label": "Verification Rules"
+  },
+  {
+   "description": "Static request refinement used when routing is deterministic (single-model shortcut) and no orchestrator call runs.",
+   "fieldname": "request_notes",
+   "fieldtype": "Small Text",
+   "label": "Request Notes"
+  },
+  {
+   "default": "0",
+   "description": "Opt-in: let the orchestrator author request notes even when routing is forced. Off = prompt content never changes implicitly with the model roster.",
+   "fieldname": "use_llm_request_notes",
+   "fieldtype": "Check",
+   "label": "Use LLM Request Notes"
+  },
+  {
+   "fieldname": "grounding_section",
+   "fieldtype": "Section Break",
+   "label": "Visual Grounding (research-backed, degrade gracefully)"
+  },
+  {
+   "default": "1",
+   "description": "Repair missing/colliding bounding boxes by OCR word-box candidate SELECTION (deterministic text match first, numbered-marks model pick second) instead of asking the model for raw coordinates. Needs the `tesseract` binary on the server; silently falls back to free-form repair without it.",
+   "fieldname": "use_ocr_anchored_repair",
+   "fieldtype": "Check",
+   "label": "OCR-Anchored Bbox Repair"
+  },
+  {
+   "default": "1",
+   "description": "After any bbox repair, crop the claimed box and have the verifier model confirm the value is actually printed inside it. Unconfirmed boxes are removed (models hallucinate boxes rather than abstain).",
+   "fieldname": "use_crop_back_check",
+   "fieldtype": "Check",
+   "label": "Crop-Back Check on Repaired Boxes"
+  },
+  {
+   "fieldname": "column_break_grounding",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Attach each claimed region's crop to the verify pass so the verifier reads the exact pixels behind every claim instead of re-scanning the whole document from memory.",
+   "fieldname": "use_verify_crops",
+   "fieldtype": "Check",
+   "label": "Per-Claim Crops in Verify"
+  },
+  {
+   "default": "0",
+   "description": "After extraction, snap each boxed value to its OCR word geometry when the text is found at exactly one confident location near the claimed box (tighten-only; never moves or fills boxes).",
+   "fieldname": "use_bbox_snap",
+   "fieldtype": "Check",
+   "label": "Snap Boxes to OCR Words"
+  },
+  {
+   "fieldname": "schema_section",
+   "fieldtype": "Section Break",
+   "label": "Output Schema"
+  },
+  {
+   "description": "JSON list of fields. Per field: key, label, kind (scalar|array), required, format (regex:\u2026 | date:indian-ddmmyyyy | amount | digits:N | strip-spaces), bbox_required, cross_check {doctype, field, filters_template}.",
+   "fieldname": "output_schema",
+   "fieldtype": "Code",
+   "label": "Output Schema (JSON)",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "match_section",
+   "fieldtype": "Section Break",
+   "label": "Record Matching (optional \u2014 reconcile against ERP records)"
+  },
+  {
+   "description": "JSON. When set, after extraction the engine fetches candidate records and the model picks which one(s) the document refers to. Keys: target_doctype; candidate_query {filters (dict or [[field,op,value]]), or_filters, fields, limit, order_by} \u2014 values may template {schema_key} (first extracted value) or {context.key}; match_guidance (plain-English matching rules for the model); confidence_threshold (0..1, below = doubt \u2192 review). Leave blank to disable matching.",
+   "fieldname": "match_config",
+   "fieldtype": "Code",
+   "label": "Match Config (JSON)",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "tools_section",
+   "fieldtype": "Section Break",
+   "label": "Tools (agentic execution \u2014 the engine calls these to resolve the document itself)"
+  },
+  {
+   "description": "JSON list of tools the engine may call (function-calling). Each: name; description (the model reads this to decide when to call it); method (a whitelisted server method \u2014 a Frappe built-in like frappe.client.get_list, or one your app writes); kind (\"read\" | \"write\"); defaults (fixed kwargs merged under the model's args); parameters (JSON-schema of the model-supplied args); permission_doctype (write tools are permission-checked against it). The model only ever picks a tool by name \u2014 the method is fixed here. Write tools receive the run's reference as trusted _context. Leave blank to use match_config / no tools.",
+   "fieldname": "tools",
+   "fieldtype": "Code",
+   "label": "Tools (JSON)",
+   "options": "JSON"
+  },
+  {
+   "description": "Domain guidance appended to the agentic resolution prompt \u2014 HOW to decide (e.g. each reference maps to its own record; prefer the most recent match).",
+   "fieldname": "agent_instructions",
+   "fieldtype": "Small Text",
+   "label": "Agent Instructions"
+  },
+  {
+   "fieldname": "budget_section",
+   "fieldtype": "Section Break",
+   "label": "Budgets"
+  },
+  {
+   "default": "4",
+   "description": "Max verify\u2192repair rounds per run.",
+   "fieldname": "max_rounds",
+   "fieldtype": "Int",
+   "label": "Max Rounds"
+  },
+  {
+   "default": "12",
+   "description": "Hard cap on LLM calls per run \u2014 checked before every call.",
+   "fieldname": "max_calls_per_run",
+   "fieldtype": "Int",
+   "label": "Max Calls Per Run"
+  },
+  {
+   "fieldname": "column_break_budget",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "480",
+   "description": "Wall-clock budget per run in seconds. Exceeded \u2192 stop repairing, record remaining deficiencies.",
+   "fieldname": "run_seconds_budget",
+   "fieldtype": "Int",
+   "label": "Run Seconds Budget"
+  },
+  {
+   "fieldname": "models_section",
+   "fieldtype": "Section Break",
+   "label": "AI Models"
+  },
+  {
+   "fieldname": "models",
+   "fieldtype": "Table",
+   "label": "Models",
+   "options": "I2A Action Model",
+   "reqd": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-07-16 17:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "I2A Action",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

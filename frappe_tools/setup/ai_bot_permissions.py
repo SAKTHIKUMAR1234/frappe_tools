@@ -161,6 +161,9 @@ _CANDIDATE_PERM_FIELDS = (
 	"select", "read", "write", "create", "delete", "submit", "cancel",
 	"amend", "report", "export", "import", "print", "email", "share",
 	"set_user_permissions", "if_owner",
+	# v16 adds a field-level masking column; intersected with the live schema in
+	# _perm_fields() so it's simply ignored on v15 (column absent).
+	"mask",
 )
 
 
