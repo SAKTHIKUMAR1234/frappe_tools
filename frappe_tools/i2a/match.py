@@ -262,7 +262,11 @@ def deterministic_candidates(action, fields, context, limit=8):
 	# — the engine encodes NO opinion about how strong a domain's keys are.
 	base_score = flt(cfg.get("base_score")) or 0.4
 	limit = cint(cfg.get("limit")) or limit
-	context_rows = cint(cfg.get("context_rows")) or 3
+	# Only evidence-backed candidates are shown by default: a row that matched a
+	# real reference on the document (exact key / suffix). The date-net "recent
+	# invoices" that matched nothing are NOT recommendations — showing them next
+	# to a real match is misleading. Opt in per action via match_config.context_rows.
+	context_rows = cint(cfg.get("context_rows"))
 	# ranking is CONFIG, not code: e.g. {"field": "posting_date", "order": "desc"}
 	# encodes "a document belongs to the most recently created matching record"
 	rank = cfg.get("rank") or {}

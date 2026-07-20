@@ -1084,6 +1084,17 @@ check("reason names the shared key", "ewaybill" in _dc["matches"][0]["reason"])
 check("numeric-suffix scored 0.7",
 	_dc["matches"][1]["target"] == "INV-2493" and _dc["matches"][1]["confidence"] == 0.7,
 	str(_dc["matches"][1]))
+# evidence-free rows (matched no reference) are NOT shown by default — only
+# candidates that matched a real bill/e-way appear next to a match
+_orig2 = FRAPPE.get_all
+FRAPPE.get_all = lambda dt, *a, **k: (
+	[{"name": "SI-0001", "ewaybill": "123456789012"},
+	 {"name": "SOI-9990", "ewaybill": None}, {"name": "SOI-9991", "ewaybill": None}]
+	if dt == "Sales Invoice" else _orig2(dt, *a, **k))
+_dc3 = match.deterministic_candidates(_act_dc, full_extraction(bill_numbers=[]), {})
+check("evidence-free padding rows dropped by default",
+	all(m["matched_value"] for m in _dc3["matches"]) and len(_dc3["matches"]) == 1, str(_dc3))
+FRAPPE.get_all = _orig2
 # nothing to search on → empty in-list matches no records (real DB semantics)
 FRAPPE.get_all = lambda dt, *a, **k: [] if dt == "Sales Invoice" else _orig_get_all(dt, *a, **k)
 _dc2 = match.deterministic_candidates(_act_dc, full_extraction(eway_bills=[]), {})
