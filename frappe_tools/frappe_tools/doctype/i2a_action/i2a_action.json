@@ -24,6 +24,8 @@
   "use_verify_crops",
   "skip_model_verify",
   "agent_text_only",
+  "deterministic_first",
+  "agent_fallback",
   "use_bbox_snap",
   "schema_section",
   "output_schema",
@@ -157,6 +159,20 @@
   },
   {
    "default": "0",
+   "description": "Resolve by exact-key proof in code (auto-apply only gate-passing unique matches); use the LLM only to extract, never to freely search/decide. Cheapest + no matching hallucination.",
+   "fieldname": "deterministic_first",
+   "fieldtype": "Check",
+   "label": "Deterministic First (proof-based matching)"
+  },
+  {
+   "default": "0",
+   "description": "When deterministic_first can't resolve a reference, fall back to the LLM tool-calling brain instead of leaving it for review. Off = unresolved go straight to human review (cheaper).",
+   "fieldname": "agent_fallback",
+   "fieldtype": "Check",
+   "label": "Agent Fallback When Unresolved"
+  },
+  {
+   "default": "0",
    "description": "After extraction, snap each boxed value to its OCR word geometry when the text is found at exactly one confident location near the claimed box (tighten-only; never moves or fills boxes).",
    "fieldname": "use_bbox_snap",
    "fieldtype": "Check",
@@ -248,7 +264,7 @@
   }
  ],
  "links": [],
- "modified": "2026-07-20 12:00:00.000000",
+ "modified": "2026-07-20 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "I2A Action",

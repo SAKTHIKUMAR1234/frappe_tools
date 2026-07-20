@@ -1117,6 +1117,75 @@ FRAPPE.get_all = _orig_get_all
 _act_dc.match_config = ""
 check("no config → None", match.deterministic_candidates(_act_dc, full_extraction(), {}) is None)
 
+# ============ e2e: deterministic_first — proof-based auto-apply, ZERO LLM
+print("\n== e2e: _deterministic_resolve (exact key auto-applies, suffix → review) ==")
+_dr_applied = []
+
+
+def _fn_apply_dr(**kw):
+    _dr_applied.append((tools.get_context() or {}).get("_x") or kw.get("sales_invoice"))
+    return {"applied": True, "invoice": kw.get("sales_invoice")}
+
+
+_TOOLFNS["x.applydr"] = _fn_apply_dr
+FRAPPE.whitelisted = [_fn_apply_dr, _probe]
+FRAPPE.has_permission = lambda *a, **k: True
+
+_dr_cat = [
+    {"name": "apply_lr_to_invoice", "method": "x.applydr", "kind": "write", "finalizes": True,
+     "corroborate": {"arg": "sales_invoice", "doctype": "Sales Invoice"},
+     "parameters": {"type": "object", "properties": {"sales_invoice": {"type": "string"}}}},
+]
+
+
+class _DRAct:
+    tools = json.dumps(_dr_cat)
+    match_config = json.dumps({
+        "target_doctype": "Sales Invoice",
+        "candidate_query": [{"or_filters": {"ewaybill": ["in", "{eway_bills}"]}, "fields": ["name", "ewaybill"]}],
+        "corroborate": [{"target_field": "ewaybill", "from": "eway_bills", "match": "exact"},
+                        {"target_field": "name", "from": "bill_numbers", "match": "numeric_suffix"}],
+    })
+
+    def parsed_schema(self):
+        return LR_SCHEMA
+
+
+class _DRState:
+    def __init__(self):
+        self.run_doc = fake_frappe.FakeRow({
+            "reference_doctype": "LR Processing Batch", "reference_name": "B1",
+            "reference_detail": "E1", "name": "RUN1"})
+        self.steps = []
+
+    def step(self, k, **kw):
+        self.steps.append({"step": k, **kw})
+
+
+_dr_gv = FRAPPE.db.get_value
+FRAPPE.db.get_value = lambda dt, name, fields=None, as_dict=False, **k: (
+    {"name": "SI-0001", "ewaybill": "123456789012"}
+    if dt == "Sales Invoice" and name == "SI-0001" else _dr_gv(dt, name, fields, as_dict=as_dict, **k))
+FRAPPE.get_all = lambda dt, *a, **k: (
+    [{"name": "SI-0001", "ewaybill": "123456789012"}] if dt == "Sales Invoice" else _orig_get_all(dt, *a, **k))
+
+# eway-only doc → exact-key auto-apply, fully resolved, no LLM
+_dr = engine._deterministic_resolve(_DRState(), _DRAct(),
+    full_extraction(bill_numbers=[]), {}, tools.parse_catalog(_DRAct()))
+check("exact-key reference auto-applied in code", _dr_applied == ["SI-0001"], str(_dr_applied))
+check("fully resolved (all references covered)", _dr["resolved"] is True, str(_dr))
+check("no LLM purpose recorded (deterministic)", "tool_calls" in _dr and all(c.get("tool") for c in _dr["tool_calls"]))
+
+# suffix-only doc (no e-way) → NOT auto-applied (gate excludes suffix) → review
+_dr_applied.clear()
+FRAPPE.get_all = lambda dt, *a, **k: (
+    [{"name": "SOI2627-00327", "ewaybill": None}] if dt == "Sales Invoice" else _orig_get_all(dt, *a, **k))
+_dr2 = engine._deterministic_resolve(_DRState(), _DRAct(),
+    full_extraction(eway_bills=[], bill_numbers=[make_item("0327")]), {}, tools.parse_catalog(_DRAct()))
+check("suffix-only NOT auto-applied (goes to review)", _dr_applied == [] and _dr2["resolved"] is False, str(_dr2))
+FRAPPE.db.get_value = _dr_gv
+FRAPPE.get_all = _orig_get_all
+
 # ====================================== unit: per-field hint in schema prompt
 print("\n== unit: schema prompt per-field hint ==")
 setup_world(schema=[dict(LR_SCHEMA[0], hint="Never an invoice number.")] + LR_SCHEMA[1:])

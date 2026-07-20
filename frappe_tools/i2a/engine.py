@@ -195,10 +195,25 @@ def _run_inner(state, action, files, context):
 	agent_result = None
 	if catalog:
 		state.reserved_calls = 0  # the reservation was FOR this phase — release it
-		try:
-			agent_result = _agentic_phase(state, action, executor, fields, context, catalog)
-		except BudgetExceeded as exc:
-			state.step("budget_stop", at="agent", note=str(exc)[:200])
+		# deterministic_first (config): resolve by PROOF, not by an LLM tool loop.
+		# Exact-key candidates (e.g. e-way bill) are auto-applied in code with
+		# ZERO judgment calls; the free-searching agent brain (expensive + a
+		# hallucination surface) is used only as an explicit opt-in fallback.
+		if cint(getattr(action, "deterministic_first", 0)):
+			try:
+				agent_result = _deterministic_resolve(state, action, fields, context, catalog)
+			except Exception as exc:
+				state.step("deterministic_resolve_failed", error=str(exc)[:200])
+			if not (agent_result and agent_result.get("resolved")) and cint(getattr(action, "agent_fallback", 0)):
+				try:
+					agent_result = _agentic_phase(state, action, executor, fields, context, catalog)
+				except BudgetExceeded as exc:
+					state.step("budget_stop", at="agent", note=str(exc)[:200])
+		else:
+			try:
+				agent_result = _agentic_phase(state, action, executor, fields, context, catalog)
+			except BudgetExceeded as exc:
+				state.step("budget_stop", at="agent", note=str(exc)[:200])
 		if not (agent_result and agent_result.get("resolved")):
 			# the agent couldn't finalize — still give the reviewer scored
 			# candidates from the ERP (config queries + corroborate rules,
@@ -275,6 +290,81 @@ def _corroborate_write(action, tool_def, args, fields, context=None):
 	# for_gate: numeric_suffix alone must NOT authorize an autonomous write
 	# (cross-series suffix collision) unless the action opts in.
 	return bool(match.is_corroborated(row, mcfg, fields, for_gate=True))
+
+
+def _deterministic_resolve(state, action, fields, context, catalog):
+	"""Proof-based resolution with ZERO judgment LLM calls (deterministic_first).
+
+	The document's references are matched against the ERP by the config's own
+	queries + corroborate rules (match.deterministic_candidates). A reference is
+	AUTO-APPLIED only when it has exactly ONE candidate that passes the
+	deterministic write gate (_corroborate_write: exact shared key, inside the
+	eligibility window) — i.e. hard proof, never model judgment. Ambiguous or
+	uncorroborated references are left for human review; the candidates are
+	returned so the review screen shows the proof-scored options.
+
+	This replaces the agentic tool loop (12 LLM calls/doc resending a growing
+	conversation) with a single extraction call + deterministic code."""
+	cand = match.deterministic_candidates(action, fields, context) or {}
+	matches = cand.get("matches") or []
+	fin = next((t for t in catalog
+		if t.get("finalizes") and (t.get("corroborate") or {}).get("arg")), None)
+
+	tool_context = {
+		"reference_doctype": state.run_doc.reference_doctype,
+		"reference_name": state.run_doc.reference_name,
+		"reference_detail": state.run_doc.reference_detail,
+		"fields": verify._values_only(fields),
+		"context": context or {},
+	}
+	applied_targets, calls = [], []
+	if fin:
+		arg = fin["corroborate"]["arg"]
+		by_ref = {}
+		for m in matches:
+			by_ref.setdefault(m.get("matched_value"), []).append(m)
+		for ref, ms in by_ref.items():
+			if ref is None:
+				continue  # a broad-net row with no matched reference — never auto-apply
+			# exactly one candidate for this reference that passes the WRITE gate
+			gated = [m for m in ms if _corroborate_write(
+				action, fin, {arg: m["target"]}, fields, context) is True]
+			if len(gated) != 1:
+				continue  # zero or ambiguous → human review
+			target = gated[0]["target"]
+			if target in applied_targets:
+				continue
+			result = tools.execute(catalog, fin["name"], {arg: target}, tool_context)
+			ok = not (isinstance(result, dict) and "error" in result)
+			calls.append({"tool": fin["name"], "ok": ok, "ref": ref, "target": target,
+				"detail": (result.get("error") if not ok else "ok")})
+			state.step("deterministic_apply", ref=ref, target=target, ok=ok)
+			if ok:
+				applied_targets.append(target)
+
+	# coverage: which references (the corroborate rules' `from` fields) exist,
+	# and which got applied — resolved only when EVERY reference is covered.
+	mcfg = match.parse_config(action) or {}
+	ref_values = set()
+	for rule in (mcfg.get("corroborate") or []):
+		src = rule.get("from")
+		if src:
+			ref_values |= {str(v) for v in match._all_values(fields, src) if v not in (None, "")}
+	covered = {str(c["ref"]) for c in calls if c["ok"]}
+	resolved = bool(applied_targets) and bool(ref_values) and covered >= ref_values
+
+	state.step("deterministic_resolve", applied=len(applied_targets),
+		references=len(ref_values), resolved=resolved)
+	return {
+		"resolved": resolved,
+		"applied": bool(applied_targets),
+		"applied_targets": applied_targets,
+		"flagged": False,
+		"tool_calls": calls,
+		"summary": (f"auto-applied by exact key: {', '.join(applied_targets)}"
+			if applied_targets else "no exact-key proof — sent to review"),
+		"match": cand,
+	}
 
 
 def _agentic_phase(state, action, executor, fields, context, catalog):
