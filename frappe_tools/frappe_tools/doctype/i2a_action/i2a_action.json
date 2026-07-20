@@ -22,6 +22,8 @@
   "use_crop_back_check",
   "column_break_grounding",
   "use_verify_crops",
+  "skip_model_verify",
+  "agent_text_only",
   "use_bbox_snap",
   "schema_section",
   "output_schema",
@@ -141,6 +143,20 @@
   },
   {
    "default": "0",
+   "description": "Skip the LLM second-opinion re-read of the document. Write safety rests on the deterministic corroboration gate, not this pass. Cuts token cost for a trusted single-pass extractor.",
+   "fieldname": "skip_model_verify",
+   "fieldtype": "Check",
+   "label": "Skip Model Verify"
+  },
+  {
+   "default": "0",
+   "description": "The resolving agent runs on text only (no image); it queries the vision model via the built-in ask_document tool when it needs to re-read the document. Cheaper matching loop.",
+   "fieldname": "agent_text_only",
+   "fieldtype": "Check",
+   "label": "Agent Text-Only (brain)"
+  },
+  {
+   "default": "0",
    "description": "After extraction, snap each boxed value to its OCR word geometry when the text is found at exactly one confident location near the claimed box (tighten-only; never moves or fills boxes).",
    "fieldname": "use_bbox_snap",
    "fieldtype": "Check",
@@ -232,7 +248,7 @@
   }
  ],
  "links": [],
- "modified": "2026-07-16 17:30:00.000000",
+ "modified": "2026-07-20 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "I2A Action",

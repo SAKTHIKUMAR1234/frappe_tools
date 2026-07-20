@@ -894,6 +894,17 @@ try:
 except ImportError:
 	print("  (PIL unavailable — real shrink checks skipped)")
 
+# ================================ e2e: skip_model_verify (cost control)
+print("\n== e2e: skip_model_verify omits the LLM re-read ==")
+setup_world()
+FRAPPE.get_doc("I2A Action", "LR Extraction").skip_model_verify = 1
+# no "verify" script entry — if the engine tried to verify, ScriptedModel would
+# raise "no scripted reply for purpose=verify". Completing proves it skipped.
+_skv_res, _skv_sm = run_engine({"extract": [full_extraction()]})
+check("run completes without a verify call", _skv_res["status"] == "Completed", _skv_res.get("status"))
+check("no verify purpose was invoked", not any(c["purpose"] == "verify" for c in _skv_sm.calls))
+check("extract still ran", any(c["purpose"] == "extract" for c in _skv_sm.calls))
+
 # ================================ e2e: session-per-run (image travels once)
 print("\n== e2e: session-per-run — image once, repairs text-only, delta rounds ==")
 setup_world()
