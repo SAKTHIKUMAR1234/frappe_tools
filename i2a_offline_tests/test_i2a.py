@@ -697,7 +697,10 @@ check("exactly one orchestrator row", sum(m.get("is_orchestrator", 0) for m in c
 check("exactly one verifier row (qwen)", sum(m.get("is_verifier", 0) for m in cfg["i2a_action"]["models"]) == 1)
 check("model rows reference declared ai_models", {m["ai_model"] for m in cfg["i2a_action"]["models"]} == {m["model_label"] for m in cfg["ai_models"]})
 check("remarks present on every model row", all(m.get("remarks") for m in cfg["i2a_action"]["models"]))
-check("grounding flags on", all(cfg["i2a_action"][k] == 1 for k in ("use_ocr_anchored_repair", "use_crop_back_check", "use_verify_crops")))
+# grounding OFF for LR (2026-07-20): the OCR-snap / crop-back re-grounding
+# relocated boxes off the value; the vision model's own boxes render correctly
+# (validated in the legacy pipeline), so LR trusts them directly.
+check("grounding flags off (trust model boxes)", all(cfg["i2a_action"].get(k, 0) == 0 for k in ("use_ocr_anchored_repair", "use_crop_back_check", "use_verify_crops", "use_bbox_snap")))
 check("settings link block present", cfg["essdee_application_settings"]["lr_i2a_action"] == cfg["i2a_action"]["action_name"])
 # the action block must satisfy the real controller's validate() constraints
 check("mode valid", cfg["i2a_action"]["mode"] in ("Manual", "Automated"))
