@@ -272,7 +272,9 @@ def _corroborate_write(action, tool_def, args, fields, context=None):
 		hi = str((context or {}).get(elig.get("context_to") or "") or "")
 		if val and ((lo and val < lo) or (hi and val > hi)):
 			return False  # outside the configured eligibility window
-	return bool(match.is_corroborated(row, mcfg, fields))
+	# for_gate: numeric_suffix alone must NOT authorize an autonomous write
+	# (cross-series suffix collision) unless the action opts in.
+	return bool(match.is_corroborated(row, mcfg, fields, for_gate=True))
 
 
 def _agentic_phase(state, action, executor, fields, context, catalog):
@@ -351,8 +353,13 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 	for _round in range(max_tool_rounds):
 		try:
 			resp = state.call_tools(executor, messages, specs, purpose="agent")
-		except BudgetExceeded:
-			raise  # labeled budget_stop by the caller — never "call failed"
+		except BudgetExceeded as exc:
+			# Do NOT re-raise: a budget stop AFTER a partial apply must still
+			# return the partial result (applied_targets + resolved=False) so
+			# the run goes to review and the writes already made are recorded —
+			# re-raising left agent_result None and the run wrongly Completed.
+			state.step("budget_stop", at="agent", note=str(exc)[:200])
+			break
 		except providers.ProviderError as exc:
 			state.step("agent_call_failed", error=str(exc)[:200])
 			break
@@ -381,10 +388,16 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 					"content": json.dumps(result, default=str)[:4000]})
 				continue
 			tool_def = next((t for t in catalog if t["name"] == tc["name"]), {})
+			# Manual mode NEVER autonomously writes: a finalizing tool is refused
+			# (the model is told to flag instead) so a non-Automated batch only
+			# ever produces review candidates, never an invoice write.
+			if tool_def.get("finalizes") and state.mode != "Automated":
+				result = {"error": "manual mode: do not apply autonomously — call the "
+					"review/flag tool so a human confirms this match"}
 			# Once an escalation landed, no further FINALIZING write may run in
 			# the same batch — a parallel [flag, apply] emission must not let the
 			# apply clobber the human handoff the flag just recorded.
-			if flagged and tool_def.get("finalizes"):
+			elif flagged and tool_def.get("finalizes"):
 				result = {"error": "skipped: this document was already escalated to a human "
 					"in this round — no further applies"}
 			else:

@@ -207,7 +207,7 @@ def fetch_candidates(cfg, fields, context):
 	return out
 
 
-def is_corroborated(target_row, cfg, fields):
+def is_corroborated(target_row, cfg, fields, for_gate=False):
 	"""Deterministic safety gate on an AI match: the chosen record must share
 	an EXACT key with the document (e.g. its ewaybill equals one the LR shows,
 	or its name equals a bill number). Without an exact key the match cannot
@@ -216,12 +216,20 @@ def is_corroborated(target_row, cfg, fields):
 	Config `corroborate`: list of {target_field, from}. Corroborated if ANY
 	rule's target value equals one of the document's extracted `from` values.
 	No `corroborate` config → returns None (feature off, confidence stands).
+
+	for_gate=True (autonomous WRITE gate): a numeric_suffix rule is NOT
+	sufficient by itself — a bare trailing number collides across series
+	(INV2627-00327 vs SOI2627-00327 vs last year's) and could steer an
+	auto-write to the wrong invoice. Suffix corroboration is allowed for the
+	gate only when match_config sets suffix_autoapply=true (opt-in). Suffix
+	still scores candidates for human review (deterministic_candidates).
 	"""
 	rules = cfg.get("corroborate")
 	if not rules:
 		return None
 	if not target_row:
 		return False
+	suffix_ok = bool(cfg.get("suffix_autoapply")) or not for_gate
 	for rule in rules:
 		tf, src = rule.get("target_field"), rule.get("from")
 		if not tf or not src:
@@ -232,11 +240,8 @@ def is_corroborated(target_row, cfg, fields):
 		src_values = [str(v) for v in _all_values(fields, src)]
 		mode = rule.get("match", "exact")
 		if mode == "numeric_suffix":
-			# invoice's trailing number (zero-stripped) == the printed bill number.
-			# Safe against digit-count collisions (1422 != 11422 as integers) but
-			# NOT against cross-series ones (INV…-01422 vs SOI…-01422 share 1422)
-			# — this rule corroborates only the record the matcher already chose,
-			# it never picks between candidates. Weakest of the exact keys.
+			if not suffix_ok:
+				continue  # suffix alone may not authorize an autonomous write
 			tnum = _trailing_int(tval)
 			if tnum is not None and any(_trailing_int(v) == tnum for v in src_values):
 				return True

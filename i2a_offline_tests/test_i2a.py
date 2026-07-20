@@ -271,6 +271,20 @@ check("numeric_suffix corroborates SOI2627-00226 vs 00226",
 check("_trailing_int strips prefix", match._trailing_int("INV2627-01422") == 1422)
 check("_trailing_int none when no digits", match._trailing_int("ABC") is None)
 
+# for_gate: numeric_suffix must NOT authorize an autonomous WRITE by itself
+# (cross-series collision INV.. vs SOI.. vs last year) — review scoring only.
+check("suffix corroborates for review (for_gate=False default)",
+      match.is_corroborated({"name": "INV2627-01422"}, _cfg_num, _bf) is True)
+check("suffix does NOT corroborate the write gate (for_gate=True)",
+      match.is_corroborated({"name": "INV2627-01422"}, _cfg_num, _bf, for_gate=True) is False)
+_cfg_num_optin = {"corroborate": _cfg_num["corroborate"], "suffix_autoapply": True}
+check("suffix corroborates the gate only when opted in",
+      match.is_corroborated({"name": "INV2627-01422"}, _cfg_num_optin, _bf, for_gate=True) is True)
+_cfg_exact_gate = {"corroborate": [{"target_field": "ewaybill", "from": "eway_bills", "match": "exact"}]}
+check("exact key still corroborates the gate",
+      match.is_corroborated({"ewaybill": "123456789012"}, _cfg_exact_gate,
+                            {"eway_bills": [make_item("123456789012")]}, for_gate=True) is True)
+
 print("\n== unit: tools (agentic execution) ==")
 
 
