@@ -39,9 +39,48 @@ def setup_ai_bot_permissions():
 	protected = _get_protected_doctypes()
 	cleanup_ai_bot_rows(protected_doctypes=protected)
 	setup_doctype_permissions(protected_doctypes=protected)
+	setup_write_permissions(protected_doctypes=protected)
 	setup_report_permissions()
 	setup_page_permissions()
 	frappe.clear_cache()
+
+
+# DocTypes the AI Bot may WRITE (create/write/delete) — its own page feature by
+# default, plus anything the operator adds in AI Bot Settings. Everything else
+# stays read-only. The page doctypes are owner-scoped: a bot edits only its own.
+_DEFAULT_WRITABLE = ("AI Bot Page", "AI Bot Page User")
+_OWNER_SCOPED = {"AI Bot Page", "AI Bot Page User"}
+_WRITE_GRANT_PTYPES = ("write", "create", "delete")
+
+
+def _get_write_allowed_doctypes():
+	allowed = set(_DEFAULT_WRITABLE)
+	if frappe.db.exists("DocType", SETTINGS_DOCTYPE):
+		try:
+			settings = frappe.get_single(SETTINGS_DOCTYPE)
+			allowed |= {row.doctype_name
+				for row in (settings.get("write_allowed_doctypes") or []) if row.doctype_name}
+		except Exception:
+			pass
+	return allowed
+
+
+def setup_write_permissions(protected_doctypes):
+	"""Upgrade the AI Bot row (permlevel 0) on each write-allowed DocType to
+	grant write/create/delete. The page doctypes are made if_owner so a bot
+	only touches its own rows. Protected doctypes are left untouched."""
+	fields = set(_perm_fields())
+	for dt in _get_write_allowed_doctypes():
+		if dt in protected_doctypes or not frappe.db.exists("DocType", dt):
+			continue
+		vals = {p: 1 for p in _WRITE_GRANT_PTYPES if p in fields}
+		if dt in _OWNER_SCOPED and "if_owner" in fields:
+			vals["if_owner"] = 1
+		for table in ("Custom DocPerm", "DocPerm"):
+			for name in frappe.get_all(table,
+				filters={"parent": dt, "role": ROLE_NAME, "permlevel": 0}, pluck="name"):
+				frappe.db.set_value(table, name, vals, update_modified=False)
+	frappe.db.commit()
 
 
 def ensure_role_exists():

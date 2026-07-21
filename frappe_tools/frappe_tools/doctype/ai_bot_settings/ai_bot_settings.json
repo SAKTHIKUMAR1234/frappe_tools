@@ -4,10 +4,24 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "write_section",
+  "write_allowed_doctypes",
   "section_break_info",
   "protected_doctypes"
  ],
  "fields": [
+  {
+   "fieldname": "write_section",
+   "fieldtype": "Section Break",
+   "label": "Write-Allowed DocTypes",
+   "description": "AI Bot is DENIED write/create/delete on every DocType except those listed here. Add a DocType to let the AI Bot write it (e.g. AI Bot Page). Everything else is read-only for the AI Bot, enforced at the permission-hook level."
+  },
+  {
+   "fieldname": "write_allowed_doctypes",
+   "fieldtype": "Table",
+   "label": "Write-Allowed DocTypes",
+   "options": "AI Bot Writable DocType"
+  },
   {
    "fieldname": "section_break_info",
    "fieldtype": "Section Break",

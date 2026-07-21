@@ -1,0 +1,22 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block page_content %}
+<div class="ai-page-wrap" style="width:100%;">
+	<h3 style="margin-bottom:12px;">{{ page_title }}</h3>
+	<!--
+		The AI-authored HTML is rendered inside a sandboxed iframe.
+		sandbox="allow-scripts" WITHOUT allow-same-origin means scripts run but
+		the content is treated as a null origin: it cannot read the viewer's
+		cookies/localStorage or call same-origin Frappe APIs with their session.
+		So the page shows only what the AI baked into it, to allowed viewers.
+	-->
+	<iframe
+		title="{{ page_title }}"
+		sandbox="allow-scripts allow-popups allow-forms"
+		referrerpolicy="no-referrer"
+		style="width:100%;min-height:80vh;border:1px solid var(--border-color, #d1d8dd);border-radius:8px;background:#fff;"
+		srcdoc="{{ ai_html | e }}"></iframe>
+</div>
+{% endblock %}
