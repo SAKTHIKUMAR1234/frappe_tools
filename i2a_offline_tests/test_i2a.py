@@ -271,6 +271,20 @@ check("numeric_suffix corroborates SOI2627-00226 vs 00226",
 check("_trailing_int strips prefix", match._trailing_int("INV2627-01422") == 1422)
 check("_trailing_int none when no digits", match._trailing_int("ABC") is None)
 
+# for_gate: numeric_suffix must NOT authorize an autonomous WRITE by itself
+# (cross-series collision INV.. vs SOI.. vs last year) — review scoring only.
+check("suffix corroborates for review (for_gate=False default)",
+      match.is_corroborated({"name": "INV2627-01422"}, _cfg_num, _bf) is True)
+check("suffix does NOT corroborate the write gate (for_gate=True)",
+      match.is_corroborated({"name": "INV2627-01422"}, _cfg_num, _bf, for_gate=True) is False)
+_cfg_num_optin = {"corroborate": _cfg_num["corroborate"], "suffix_autoapply": True}
+check("suffix corroborates the gate only when opted in",
+      match.is_corroborated({"name": "INV2627-01422"}, _cfg_num_optin, _bf, for_gate=True) is True)
+_cfg_exact_gate = {"corroborate": [{"target_field": "ewaybill", "from": "eway_bills", "match": "exact"}]}
+check("exact key still corroborates the gate",
+      match.is_corroborated({"ewaybill": "123456789012"}, _cfg_exact_gate,
+                            {"eway_bills": [make_item("123456789012")]}, for_gate=True) is True)
+
 print("\n== unit: tools (agentic execution) ==")
 
 
@@ -1084,6 +1098,17 @@ check("reason names the shared key", "ewaybill" in _dc["matches"][0]["reason"])
 check("numeric-suffix scored 0.7",
 	_dc["matches"][1]["target"] == "INV-2493" and _dc["matches"][1]["confidence"] == 0.7,
 	str(_dc["matches"][1]))
+# evidence-free rows (matched no reference) are NOT shown by default — only
+# candidates that matched a real bill/e-way appear next to a match
+_orig2 = FRAPPE.get_all
+FRAPPE.get_all = lambda dt, *a, **k: (
+	[{"name": "SI-0001", "ewaybill": "123456789012"},
+	 {"name": "SOI-9990", "ewaybill": None}, {"name": "SOI-9991", "ewaybill": None}]
+	if dt == "Sales Invoice" else _orig2(dt, *a, **k))
+_dc3 = match.deterministic_candidates(_act_dc, full_extraction(bill_numbers=[]), {})
+check("evidence-free padding rows dropped by default",
+	all(m["matched_value"] for m in _dc3["matches"]) and len(_dc3["matches"]) == 1, str(_dc3))
+FRAPPE.get_all = _orig2
 # nothing to search on → empty in-list matches no records (real DB semantics)
 FRAPPE.get_all = lambda dt, *a, **k: [] if dt == "Sales Invoice" else _orig_get_all(dt, *a, **k)
 _dc2 = match.deterministic_candidates(_act_dc, full_extraction(eway_bills=[]), {})
@@ -1091,6 +1116,75 @@ check("no candidates when nothing to search on", _dc2 is not None and _dc2["matc
 FRAPPE.get_all = _orig_get_all
 _act_dc.match_config = ""
 check("no config → None", match.deterministic_candidates(_act_dc, full_extraction(), {}) is None)
+
+# ============ e2e: deterministic_first — proof-based auto-apply, ZERO LLM
+print("\n== e2e: _deterministic_resolve (exact key auto-applies, suffix → review) ==")
+_dr_applied = []
+
+
+def _fn_apply_dr(**kw):
+    _dr_applied.append((tools.get_context() or {}).get("_x") or kw.get("sales_invoice"))
+    return {"applied": True, "invoice": kw.get("sales_invoice")}
+
+
+_TOOLFNS["x.applydr"] = _fn_apply_dr
+FRAPPE.whitelisted = [_fn_apply_dr, _probe]
+FRAPPE.has_permission = lambda *a, **k: True
+
+_dr_cat = [
+    {"name": "apply_lr_to_invoice", "method": "x.applydr", "kind": "write", "finalizes": True,
+     "corroborate": {"arg": "sales_invoice", "doctype": "Sales Invoice"},
+     "parameters": {"type": "object", "properties": {"sales_invoice": {"type": "string"}}}},
+]
+
+
+class _DRAct:
+    tools = json.dumps(_dr_cat)
+    match_config = json.dumps({
+        "target_doctype": "Sales Invoice",
+        "candidate_query": [{"or_filters": {"ewaybill": ["in", "{eway_bills}"]}, "fields": ["name", "ewaybill"]}],
+        "corroborate": [{"target_field": "ewaybill", "from": "eway_bills", "match": "exact"},
+                        {"target_field": "name", "from": "bill_numbers", "match": "numeric_suffix"}],
+    })
+
+    def parsed_schema(self):
+        return LR_SCHEMA
+
+
+class _DRState:
+    def __init__(self):
+        self.run_doc = fake_frappe.FakeRow({
+            "reference_doctype": "LR Processing Batch", "reference_name": "B1",
+            "reference_detail": "E1", "name": "RUN1"})
+        self.steps = []
+
+    def step(self, k, **kw):
+        self.steps.append({"step": k, **kw})
+
+
+_dr_gv = FRAPPE.db.get_value
+FRAPPE.db.get_value = lambda dt, name, fields=None, as_dict=False, **k: (
+    {"name": "SI-0001", "ewaybill": "123456789012"}
+    if dt == "Sales Invoice" and name == "SI-0001" else _dr_gv(dt, name, fields, as_dict=as_dict, **k))
+FRAPPE.get_all = lambda dt, *a, **k: (
+    [{"name": "SI-0001", "ewaybill": "123456789012"}] if dt == "Sales Invoice" else _orig_get_all(dt, *a, **k))
+
+# eway-only doc → exact-key auto-apply, fully resolved, no LLM
+_dr = engine._deterministic_resolve(_DRState(), _DRAct(),
+    full_extraction(bill_numbers=[]), {}, tools.parse_catalog(_DRAct()))
+check("exact-key reference auto-applied in code", _dr_applied == ["SI-0001"], str(_dr_applied))
+check("fully resolved (all references covered)", _dr["resolved"] is True, str(_dr))
+check("no LLM purpose recorded (deterministic)", "tool_calls" in _dr and all(c.get("tool") for c in _dr["tool_calls"]))
+
+# suffix-only doc (no e-way) → NOT auto-applied (gate excludes suffix) → review
+_dr_applied.clear()
+FRAPPE.get_all = lambda dt, *a, **k: (
+    [{"name": "SOI2627-00327", "ewaybill": None}] if dt == "Sales Invoice" else _orig_get_all(dt, *a, **k))
+_dr2 = engine._deterministic_resolve(_DRState(), _DRAct(),
+    full_extraction(eway_bills=[], bill_numbers=[make_item("0327")]), {}, tools.parse_catalog(_DRAct()))
+check("suffix-only NOT auto-applied (goes to review)", _dr_applied == [] and _dr2["resolved"] is False, str(_dr2))
+FRAPPE.db.get_value = _dr_gv
+FRAPPE.get_all = _orig_get_all
 
 # ====================================== unit: per-field hint in schema prompt
 print("\n== unit: schema prompt per-field hint ==")
