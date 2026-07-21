@@ -37,89 +37,25 @@ def setup_ai_bot_permissions():
 	"""
 	ensure_role_exists()
 	protected = _get_protected_doctypes()
-	allowlist = _get_write_allowed_doctypes()
-	cleanup_ai_bot_rows(protected_doctypes=protected, allowlist=allowlist)
+	cleanup_ai_bot_rows(protected_doctypes=protected)
 	setup_doctype_permissions(protected_doctypes=protected)
-	setup_write_permissions(protected_doctypes=protected)
 	setup_report_permissions()
 	setup_page_permissions()
+	setup_dashboard_manager_permissions()
 	frappe.clear_cache()
 
 
-# ptypes that mean "a user deliberately granted more than our read-only default"
-_WRITE_LIKE = ("write", "create", "delete", "submit", "cancel", "amend",
-	"import", "share", "set_user_permissions")
+# ---------------- Dashboard-manager role (write path) ------------------------
+#
+# The AI Bot role is READ-ONLY everywhere — it never grants write. The Custom
+# User Dashboard feature still needs a bot to CREATE dashboards, so that write
+# lives on a SEPARATE role the operator assigns to a dedicated dashboard user
+# (typically alongside AI Bot, which supplies the read access). The role is
+# owner-scoped (if_owner): a bot creates and edits only its OWN dashboards.
 
-
-def _is_our_default_row(row, fields):
-	"""True if this AI Bot row is one WE plant: pure read-style, no if_owner.
-	Any write-style flag or if_owner means a USER customized it → we preserve it."""
-	if int(row.get("if_owner") or 0):
-		return False
-	return not any(int(row.get(p) or 0) for p in _WRITE_LIKE if p in fields)
-
-
-# DocTypes the AI Bot may WRITE (create/write/delete) — its own dashboard feature
-# by default, plus anything the operator adds in AI Bot Settings. Everything else
-# stays read-only. The dashboard doctypes are owner-scoped: a bot edits only its own.
-_DEFAULT_WRITABLE = ("Custom User Dashboard", "Custom User Dashboard User")
-_OWNER_SCOPED = {"Custom User Dashboard", "Custom User Dashboard User"}
-_WRITE_GRANT_PTYPES = ("write", "create", "delete")
-
-
-def _get_write_allowed_doctypes():
-	allowed = set(_DEFAULT_WRITABLE)
-	if frappe.db.exists("DocType", SETTINGS_DOCTYPE):
-		try:
-			settings = frappe.get_single(SETTINGS_DOCTYPE)
-			allowed |= {row.doctype_name
-				for row in (settings.get("write_allowed_doctypes") or []) if row.doctype_name}
-		except Exception:
-			pass
-	return allowed
-
-
-def setup_write_permissions(protected_doctypes):
-	"""Grant AI Bot WRITE on each write-allowed DocType, WITHOUT touching its
-	read-everywhere row.
-
-	- Owner-scoped doctypes (the dashboard): the base read row planted by
-	  setup_doctype_permissions stays as read-ALL (so 'read everything' holds),
-	  and a SEPARATE if_owner row adds write/create/delete — a bot reads every
-	  dashboard but edits only its own.
-	- Other write-allowed doctypes: write/create/delete are added onto the
-	  existing (read-all) row (write any).
-	"""
-	fields = set(_perm_fields())
-	for dt in _get_write_allowed_doctypes():
-		if dt in protected_doctypes or not frappe.db.exists("DocType", dt):
-			continue
-		for table in ("Custom DocPerm", "DocPerm"):
-			rows = frappe.get_all(table,
-				filters={"parent": dt, "role": ROLE_NAME, "permlevel": 0}, pluck="name")
-			if not rows:
-				continue
-			if dt in _OWNER_SCOPED:
-				# keep read-all row; add a separate if_owner write row (once)
-				if not frappe.db.exists(table,
-					{"parent": dt, "role": ROLE_NAME, "permlevel": 0, "if_owner": 1}):
-					doc = frappe.new_doc(table)
-					doc.parent = dt
-					doc.parenttype = "DocType"
-					doc.parentfield = "permissions"
-					doc.role = ROLE_NAME
-					doc.permlevel = 0
-					for p in _WRITE_GRANT_PTYPES:
-						if p in fields:
-							setattr(doc, p, 1)
-					if "if_owner" in fields:
-						doc.if_owner = 1
-					doc.db_insert()
-			else:
-				vals = {p: 1 for p in _WRITE_GRANT_PTYPES if p in fields}
-				for name in rows:
-					frappe.db.set_value(table, name, vals, update_modified=False)
-	frappe.db.commit()
+DASHBOARD_MANAGER_ROLE = "Custom User Dashboard Manager"
+_DASHBOARD_DOCTYPES = ("Custom User Dashboard", "Custom User Dashboard User")
+_MANAGER_PTYPES = ("read", "write", "create", "delete", "report", "print", "email", "export")
 
 
 def ensure_role_exists():
@@ -130,6 +66,50 @@ def ensure_role_exists():
 	role.role_name = ROLE_NAME
 	role.desk_access = 0
 	role.insert(ignore_permissions=True)
+	frappe.db.commit()
+
+
+def ensure_dashboard_manager_role():
+	"""Create the Custom User Dashboard Manager role if it doesn't exist yet.
+	Needs desk access so an assigned user can reach the dashboard doctype UI."""
+	if frappe.db.exists("Role", DASHBOARD_MANAGER_ROLE):
+		return
+	role = frappe.new_doc("Role")
+	role.role_name = DASHBOARD_MANAGER_ROLE
+	role.desk_access = 1
+	role.insert(ignore_permissions=True)
+	frappe.db.commit()
+
+
+def setup_dashboard_manager_permissions():
+	"""Grant the dashboard-manager role owner-scoped create/edit on the Custom
+	User Dashboard doctypes. Idempotent: wipes its own rows and re-adds them, so
+	re-running migrate keeps exactly one clean row per doctype.
+	"""
+	ensure_dashboard_manager_role()
+	fields = set(_perm_fields())
+	for dt in _DASHBOARD_DOCTYPES:
+		if not frappe.db.exists("DocType", dt):
+			continue
+		uses_custom = frappe.db.exists("Custom DocPerm", {"parent": dt})
+		target = "Custom DocPerm" if uses_custom else "DocPerm"
+		if uses_custom:
+			_mirror_standard_into_custom(dt)
+		for table in ("DocPerm", "Custom DocPerm"):
+			frappe.db.delete(table, {"parent": dt, "role": DASHBOARD_MANAGER_ROLE})
+		doc = frappe.new_doc(target)
+		doc.parent = dt
+		doc.parenttype = "DocType"
+		doc.parentfield = "permissions"
+		doc.role = DASHBOARD_MANAGER_ROLE
+		doc.permlevel = 0
+		# set every flag explicitly (DocPerm defaults write-style to 1): grant the
+		# manager ptypes, deny submit/cancel/amend/import/share/... then scope to owner.
+		for field in fields:
+			setattr(doc, field, 1 if field in _MANAGER_PTYPES else 0)
+		if "if_owner" in fields:
+			doc.if_owner = 1
+		doc.db_insert()
 	frappe.db.commit()
 
 
@@ -152,48 +132,46 @@ def _get_protected_doctypes():
 # ---------------- Cleanup ----------------------------------------------------
 
 
-def cleanup_ai_bot_rows(protected_doctypes, allowlist):
-	"""Drop only the AI Bot rows WE manage; PRESERVE what a user granted.
+def cleanup_ai_bot_rows(protected_doctypes):
+	"""Wipe EVERY AI Bot doctype/report permission (except the manual protected
+	list), so nothing stale — and no old write-granting row — survives. The
+	re-seed then re-adds READ-ONLY on every doctype.
 
-	Deleted (ours / stale, to be re-seeded fresh):
-	  - rows on a DocType that no longer exists (stale),
-	  - rows on our write-allowlist doctypes (we own those grants),
-	  - our default read-only rows (pure read-style, no if_owner).
-	Preserved (never touched):
-	  - rows the manual protected list names,
-	  - rows a USER granted on any other app's DocType — i.e. rows carrying a
-	    write-style flag or if_owner. E.g. a hand-added AI Bot write on
-	    'Packing Slip Item' stays exactly as the user set it.
-
-	Has Role (Report/Page) is wiped and rebuilt as before.
+	There is no 'preserve rows that happen to have write' heuristic: that kept
+	old full-permission rows (Write/Create/Delete on List View Settings,
+	Prospect, …) alive on production. The AI Bot role never grants write; any
+	write functionality lives on a SEPARATE role (see
+	setup_dashboard_manager_permissions). The protected list is the only thing
+	this wipe skips.
 	"""
-	fields = _perm_fields()
-	all_doctypes = set(frappe.get_all("DocType", pluck="name"))
-	for table in ("DocPerm", "Custom DocPerm"):
-		rows = frappe.get_all(
-			table, filters={"role": ROLE_NAME},
-			fields=["name", "parent", *fields],
-		)
-		to_delete = []
-		for r in rows:
-			dt = r.parent
-			if dt in protected_doctypes:
-				continue  # manual protection — leave alone
-			if dt not in all_doctypes:
-				to_delete.append(r.name)  # stale (deleted/renamed doctype)
-			elif dt in allowlist:
-				to_delete.append(r.name)  # our managed write target — re-seeded
-			elif _is_our_default_row(r, fields):
-				to_delete.append(r.name)  # our default read row — re-seeded
-			# else: user-given write/if_owner on another app's doctype → KEEP
-		if to_delete:
-			frappe.db.delete(table, {"name": ("in", to_delete)})
+	doctype_filters = {"role": ROLE_NAME}
+	if protected_doctypes:
+		doctype_filters["parent"] = ("not in", list(protected_doctypes))
 
+	frappe.db.delete("DocPerm", doctype_filters)
+	frappe.db.delete("Custom DocPerm", doctype_filters)
 	frappe.db.delete(
 		"Has Role",
 		{"role": ROLE_NAME, "parenttype": ("in", ["Report", "Page"])},
 	)
 	frappe.db.commit()
+
+
+def reset_ai_bot_permissions():
+	"""Full reset: delete ALL AI Bot doctype/report/page permissions (ignoring
+	the protected list too) and re-seed from scratch — READ-ONLY on every
+	doctype + report, write nowhere. Run on a site that accumulated stray AI Bot
+	write grants (e.g. old full-access rows from a previous scheme):
+
+	    bench --site <site> execute frappe_tools.setup.ai_bot_permissions.reset_ai_bot_permissions
+	"""
+	frappe.db.delete("DocPerm", {"role": ROLE_NAME})
+	frappe.db.delete("Custom DocPerm", {"role": ROLE_NAME})
+	frappe.db.delete("Has Role", {"role": ROLE_NAME, "parenttype": ("in", ["Report", "Page"])})
+	frappe.db.commit()
+	setup_ai_bot_permissions()
+	print("AI Bot permissions reset: READ-ONLY on every DocType + Report; write nowhere. "
+		"Dashboard writes are on the separate '{0}' role.".format(DASHBOARD_MANAGER_ROLE))
 
 
 # ---------------- DocType perms ----------------------------------------------
@@ -360,8 +338,14 @@ def _collect_permlevels(doctype):
 
 
 def _insert_ai_bot_row(table, doctype, permlevel):
-	"""Add one AI Bot row at the given permlevel into `table` (DocPerm or
-	Custom DocPerm). Both have identical schemas, so one helper covers both.
+	"""Add one READ-ONLY AI Bot row at the given permlevel into `table` (DocPerm
+	or Custom DocPerm).
+
+	CRITICAL: `frappe.new_doc("DocPerm")` defaults write/create/delete/share to 1
+	(standard DocPerm's "full access" defaults — Custom DocPerm defaults them to
+	0). So we must set EVERY permission flag explicitly: read-style → 1, all
+	write-style / if_owner → 0. Relying on the defaults silently granted AI Bot
+	full write on every standard-DocPerm doctype (the 2026-07 prod bug).
 	"""
 	doc = frappe.new_doc(table)
 	doc.parent = doctype
@@ -369,9 +353,8 @@ def _insert_ai_bot_row(table, doctype, permlevel):
 	doc.parentfield = "permissions"
 	doc.role = ROLE_NAME
 	doc.permlevel = permlevel
-	for ptype in _AI_BOT_PTYPES:
-		if hasattr(doc, ptype):
-			setattr(doc, ptype, 1)
+	for field in _perm_fields():
+		setattr(doc, field, 1 if field in _AI_BOT_PTYPES else 0)
 	doc.db_insert()
 
 
