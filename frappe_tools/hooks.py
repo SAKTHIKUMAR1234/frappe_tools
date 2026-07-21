@@ -246,8 +246,15 @@ ignore_links_on_delete = ['Scanned Document Detail']
 app_include_js = ["tools_plugin.bundle.js"]
 
 doc_events = {
+	# Hard write guard: the AI Bot role may write ONLY the allowlisted DocTypes
+	# (Custom User Dashboard + AI Bot Settings' write list). Every other write is refused
+	# at the document lifecycle — catches paths the permission hook can't (e.g.
+	# Frappe's built-in User self-edit, which would otherwise allow role
+	# self-assignment / privilege escalation).
 	"*": {
-		"on_rename": "method",
+		"before_insert": "frappe_tools.permissions.ai_bot_guard_write",
+		"before_save": "frappe_tools.permissions.ai_bot_guard_write",
+		"on_trash": "frappe_tools.permissions.ai_bot_guard_write",
 	}
 }
 

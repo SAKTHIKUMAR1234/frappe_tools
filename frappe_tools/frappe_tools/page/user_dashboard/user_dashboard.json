@@ -1,0 +1,17 @@
+{
+ "content": null,
+ "creation": "2026-07-21 00:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-07-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "user-dashboard",
+ "owner": "Administrator",
+ "page_name": "user-dashboard",
+ "roles": [],
+ "standard": "Yes",
+ "system_page": 0,
+ "title": "User Dashboard"
+}
