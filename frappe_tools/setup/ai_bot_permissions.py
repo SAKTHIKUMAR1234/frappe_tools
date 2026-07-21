@@ -37,12 +37,26 @@ def setup_ai_bot_permissions():
 	"""
 	ensure_role_exists()
 	protected = _get_protected_doctypes()
-	cleanup_ai_bot_rows(protected_doctypes=protected)
+	allowlist = _get_write_allowed_doctypes()
+	cleanup_ai_bot_rows(protected_doctypes=protected, allowlist=allowlist)
 	setup_doctype_permissions(protected_doctypes=protected)
 	setup_write_permissions(protected_doctypes=protected)
 	setup_report_permissions()
 	setup_page_permissions()
 	frappe.clear_cache()
+
+
+# ptypes that mean "a user deliberately granted more than our read-only default"
+_WRITE_LIKE = ("write", "create", "delete", "submit", "cancel", "amend",
+	"import", "share", "set_user_permissions")
+
+
+def _is_our_default_row(row, fields):
+	"""True if this AI Bot row is one WE plant: pure read-style, no if_owner.
+	Any write-style flag or if_owner means a USER customized it → we preserve it."""
+	if int(row.get("if_owner") or 0):
+		return False
+	return not any(int(row.get(p) or 0) for p in _WRITE_LIKE if p in fields)
 
 
 # DocTypes the AI Bot may WRITE (create/write/delete) — its own dashboard feature
@@ -138,21 +152,42 @@ def _get_protected_doctypes():
 # ---------------- Cleanup ----------------------------------------------------
 
 
-def cleanup_ai_bot_rows(protected_doctypes):
-	"""Drop every AI Bot row from DocPerm / Custom DocPerm (except protected
-	doctypes) and from Has Role for Reports / Pages.
+def cleanup_ai_bot_rows(protected_doctypes, allowlist):
+	"""Drop only the AI Bot rows WE manage; PRESERVE what a user granted.
 
-	The Has Role wipe is unconditional — Reports and Pages aren't bound to
-	user customizations the same way doctype permissions are, and a stale
-	Has Role row for a deleted Report would block migrate the same way a
-	stale DocPerm does.
+	Deleted (ours / stale, to be re-seeded fresh):
+	  - rows on a DocType that no longer exists (stale),
+	  - rows on our write-allowlist doctypes (we own those grants),
+	  - our default read-only rows (pure read-style, no if_owner).
+	Preserved (never touched):
+	  - rows the manual protected list names,
+	  - rows a USER granted on any other app's DocType — i.e. rows carrying a
+	    write-style flag or if_owner. E.g. a hand-added AI Bot write on
+	    'Packing Slip Item' stays exactly as the user set it.
+
+	Has Role (Report/Page) is wiped and rebuilt as before.
 	"""
-	doctype_filters = {"role": ROLE_NAME}
-	if protected_doctypes:
-		doctype_filters["parent"] = ("not in", list(protected_doctypes))
-
-	frappe.db.delete("DocPerm", doctype_filters)
-	frappe.db.delete("Custom DocPerm", doctype_filters)
+	fields = _perm_fields()
+	all_doctypes = set(frappe.get_all("DocType", pluck="name"))
+	for table in ("DocPerm", "Custom DocPerm"):
+		rows = frappe.get_all(
+			table, filters={"role": ROLE_NAME},
+			fields=["name", "parent", *fields],
+		)
+		to_delete = []
+		for r in rows:
+			dt = r.parent
+			if dt in protected_doctypes:
+				continue  # manual protection — leave alone
+			if dt not in all_doctypes:
+				to_delete.append(r.name)  # stale (deleted/renamed doctype)
+			elif dt in allowlist:
+				to_delete.append(r.name)  # our managed write target — re-seeded
+			elif _is_our_default_row(r, fields):
+				to_delete.append(r.name)  # our default read row — re-seeded
+			# else: user-given write/if_owner on another app's doctype → KEEP
+		if to_delete:
+			frappe.db.delete(table, {"name": ("in", to_delete)})
 
 	frappe.db.delete(
 		"Has Role",
@@ -183,8 +218,10 @@ def setup_doctype_permissions(protected_doctypes):
 	doctypes_with_custom = set(
 		frappe.get_all("Custom DocPerm", pluck="parent", distinct=True)
 	)
-	existing_in_custom = _existing_ai_bot_rows("Custom DocPerm")
-	existing_in_standard = _existing_ai_bot_rows("DocPerm")
+	# key on rows that GRANT READ (not merely exist): a preserved write-only
+	# user row must NOT block our read grant — we ensure read on every doctype.
+	existing_in_custom = _existing_ai_bot_read_rows("Custom DocPerm")
+	existing_in_standard = _existing_ai_bot_read_rows("DocPerm")
 
 	added = 0
 	for doctype in doctypes:
@@ -285,6 +322,18 @@ def _existing_ai_bot_rows(table):
 		for row in frappe.get_all(
 			table,
 			filters={"role": ROLE_NAME},
+			fields=["parent", "permlevel"],
+		)
+	}
+
+
+def _existing_ai_bot_read_rows(table):
+	"""Set of (parent, permlevel) where an AI Bot row GRANTS read in `table`."""
+	return {
+		(row.parent, int(row.permlevel or 0))
+		for row in frappe.get_all(
+			table,
+			filters={"role": ROLE_NAME, "read": 1},
 			fields=["parent", "permlevel"],
 		)
 	}

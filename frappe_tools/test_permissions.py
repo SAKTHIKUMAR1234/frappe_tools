@@ -97,3 +97,23 @@ class TestAiBotPermission(FrappeTestCase):
 			self.assertEqual(permissions.ai_bot_query_conditions(user="bot@x.com"), "")
 		with patch.object(permissions.frappe, "get_roles", return_value=[]):
 			self.assertIsNone(permissions.ai_bot_query_conditions(user="u@x.com"))
+
+
+class TestAiBotReseedPreservation(FrappeTestCase):
+	"""The migrate re-seed manages only OUR grants (read-everywhere + the write
+	allowlist). A row a USER added (write-style or if_owner) on another app's
+	DocType must be detected as non-default and preserved verbatim."""
+
+	def test_is_our_default_row(self):
+		from frappe_tools.setup import ai_bot_permissions as ab
+		fields = ["read", "select", "report", "print", "email", "export",
+			"write", "create", "delete", "submit", "cancel", "if_owner"]
+		# our default: pure read-style, no if_owner → ours (safe to re-seed)
+		self.assertTrue(ab._is_our_default_row(
+			{"read": 1, "select": 1, "report": 1, "write": 0, "if_owner": 0}, fields))
+		# user granted write → preserve
+		self.assertFalse(ab._is_our_default_row({"read": 1, "write": 1}, fields))
+		self.assertFalse(ab._is_our_default_row({"read": 1, "create": 1}, fields))
+		self.assertFalse(ab._is_our_default_row({"read": 1, "delete": 1}, fields))
+		# if_owner set → preserve (a scoped customization)
+		self.assertFalse(ab._is_our_default_row({"read": 1, "if_owner": 1}, fields))
