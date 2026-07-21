@@ -66,20 +66,45 @@ def _get_write_allowed_doctypes():
 
 
 def setup_write_permissions(protected_doctypes):
-	"""Upgrade the AI Bot row (permlevel 0) on each write-allowed DocType to
-	grant write/create/delete. The page doctypes are made if_owner so a bot
-	only touches its own rows. Protected doctypes are left untouched."""
+	"""Grant AI Bot WRITE on each write-allowed DocType, WITHOUT touching its
+	read-everywhere row.
+
+	- Owner-scoped doctypes (the dashboard): the base read row planted by
+	  setup_doctype_permissions stays as read-ALL (so 'read everything' holds),
+	  and a SEPARATE if_owner row adds write/create/delete — a bot reads every
+	  dashboard but edits only its own.
+	- Other write-allowed doctypes: write/create/delete are added onto the
+	  existing (read-all) row (write any).
+	"""
 	fields = set(_perm_fields())
 	for dt in _get_write_allowed_doctypes():
 		if dt in protected_doctypes or not frappe.db.exists("DocType", dt):
 			continue
-		vals = {p: 1 for p in _WRITE_GRANT_PTYPES if p in fields}
-		if dt in _OWNER_SCOPED and "if_owner" in fields:
-			vals["if_owner"] = 1
 		for table in ("Custom DocPerm", "DocPerm"):
-			for name in frappe.get_all(table,
-				filters={"parent": dt, "role": ROLE_NAME, "permlevel": 0}, pluck="name"):
-				frappe.db.set_value(table, name, vals, update_modified=False)
+			rows = frappe.get_all(table,
+				filters={"parent": dt, "role": ROLE_NAME, "permlevel": 0}, pluck="name")
+			if not rows:
+				continue
+			if dt in _OWNER_SCOPED:
+				# keep read-all row; add a separate if_owner write row (once)
+				if not frappe.db.exists(table,
+					{"parent": dt, "role": ROLE_NAME, "permlevel": 0, "if_owner": 1}):
+					doc = frappe.new_doc(table)
+					doc.parent = dt
+					doc.parenttype = "DocType"
+					doc.parentfield = "permissions"
+					doc.role = ROLE_NAME
+					doc.permlevel = 0
+					for p in _WRITE_GRANT_PTYPES:
+						if p in fields:
+							setattr(doc, p, 1)
+					if "if_owner" in fields:
+						doc.if_owner = 1
+					doc.db_insert()
+			else:
+				vals = {p: 1 for p in _WRITE_GRANT_PTYPES if p in fields}
+				for name in rows:
+					frappe.db.set_value(table, name, vals, update_modified=False)
 	frappe.db.commit()
 
 
