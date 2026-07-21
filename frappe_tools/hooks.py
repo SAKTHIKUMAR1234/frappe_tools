@@ -247,7 +247,7 @@ app_include_js = ["tools_plugin.bundle.js"]
 
 doc_events = {
 	# Hard write guard: the AI Bot role may write ONLY the allowlisted DocTypes
-	# (AI Bot Page + AI Bot Settings' write list). Every other write is refused
+	# (Custom User Dashboard + AI Bot Settings' write list). Every other write is refused
 	# at the document lifecycle — catches paths the permission hook can't (e.g.
 	# Frappe's built-in User self-edit, which would otherwise allow role
 	# self-assignment / privilege escalation).

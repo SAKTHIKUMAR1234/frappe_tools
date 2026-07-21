@@ -34,8 +34,8 @@ WRITE_PTYPES = {"write", "create", "delete", "submit", "cancel", "amend",
 	"import", "share", "set_user_permissions"}
 
 # DocTypes the AI Bot may always write, even before AI Bot Settings is
-# configured — its own page feature. Extra ones are added via the settings table.
-DEFAULT_WRITABLE = {"AI Bot Page", "AI Bot Page User"}
+# configured — its own dashboard feature. Extra ones are added via the settings table.
+DEFAULT_WRITABLE = {"Custom User Dashboard", "Custom User Dashboard User"}
 
 
 def _is_v16():

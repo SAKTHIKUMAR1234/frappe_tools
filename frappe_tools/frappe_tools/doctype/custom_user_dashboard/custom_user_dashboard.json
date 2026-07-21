@@ -25,7 +25,7 @@
    "reqd": 1
   },
   {
-   "description": "Public link slug. Auto-filled from the title; the page is served at /ai-page/<route>.",
+   "description": "Public link slug. Auto-filled from the title; served at /user-dashboard?name=<route>.",
    "fieldname": "route",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -57,11 +57,11 @@
    "label": "Access"
   },
   {
-   "description": "Only these users can open the page when Require Auth is on.",
+   "description": "Only these users can open the dashboard when Require Auth is on.",
    "fieldname": "allowed_users",
    "fieldtype": "Table",
    "label": "Allowed Users",
-   "options": "AI Bot Page User"
+   "options": "Custom User Dashboard User"
   },
   {
    "fieldname": "content_section",
@@ -81,7 +81,7 @@
  "modified": "2026-07-21 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
- "name": "AI Bot Page",
+ "name": "Custom User Dashboard",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [

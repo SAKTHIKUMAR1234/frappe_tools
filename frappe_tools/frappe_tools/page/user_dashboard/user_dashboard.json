@@ -7,11 +7,11 @@
  "modified": "2026-07-21 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
- "name": "ai-pages",
+ "name": "user-dashboard",
  "owner": "Administrator",
- "page_name": "ai-pages",
+ "page_name": "user-dashboard",
  "roles": [],
  "standard": "Yes",
  "system_page": 0,
- "title": "AI Pages"
+ "title": "User Dashboard"
 }

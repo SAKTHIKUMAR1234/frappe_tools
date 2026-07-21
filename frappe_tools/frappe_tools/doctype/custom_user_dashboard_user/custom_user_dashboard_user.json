@@ -23,7 +23,7 @@
  "modified": "2026-07-21 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
- "name": "AI Bot Page User",
+ "name": "Custom User Dashboard User",
  "owner": "Administrator",
  "permissions": [],
  "sort_field": "modified",

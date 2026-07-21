@@ -45,11 +45,11 @@ def setup_ai_bot_permissions():
 	frappe.clear_cache()
 
 
-# DocTypes the AI Bot may WRITE (create/write/delete) — its own page feature by
-# default, plus anything the operator adds in AI Bot Settings. Everything else
-# stays read-only. The page doctypes are owner-scoped: a bot edits only its own.
-_DEFAULT_WRITABLE = ("AI Bot Page", "AI Bot Page User")
-_OWNER_SCOPED = {"AI Bot Page", "AI Bot Page User"}
+# DocTypes the AI Bot may WRITE (create/write/delete) — its own dashboard feature
+# by default, plus anything the operator adds in AI Bot Settings. Everything else
+# stays read-only. The dashboard doctypes are owner-scoped: a bot edits only its own.
+_DEFAULT_WRITABLE = ("Custom User Dashboard", "Custom User Dashboard User")
+_OWNER_SCOPED = {"Custom User Dashboard", "Custom User Dashboard User"}
 _WRITE_GRANT_PTYPES = ("write", "create", "delete")
 
 

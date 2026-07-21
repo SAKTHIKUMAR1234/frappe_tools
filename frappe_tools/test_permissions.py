@@ -22,7 +22,7 @@ class TestAiBotPermission(FrappeTestCase):
 
 	def setUp(self):
 		# fixed allowlist for deterministic tests
-		self._p = patch.object(permissions, "_write_allowed_doctypes", return_value={"AI Bot Page"})
+		self._p = patch.object(permissions, "_write_allowed_doctypes", return_value={"Custom User Dashboard"})
 		self._p.start()
 
 	def tearDown(self):
@@ -52,7 +52,7 @@ class TestAiBotPermission(FrappeTestCase):
 		with patch.object(permissions, "_is_v16", return_value=False), \
 		     patch.object(permissions.frappe, "get_roles", return_value=["AI Bot"]):
 			# allowlisted → neutral (None) so the DocPerm row grants it
-			self.assertIsNone(permissions.ai_bot_has_permission(_Doc("AI Bot Page"), "write", "bot@x.com"))
+			self.assertIsNone(permissions.ai_bot_has_permission(_Doc("Custom User Dashboard"), "write", "bot@x.com"))
 
 	def test_system_manager_never_restricted(self):
 		with patch.object(permissions, "_is_v16", return_value=False), \
@@ -70,7 +70,7 @@ class TestAiBotPermission(FrappeTestCase):
 		with patch.object(permissions, "_is_v16", return_value=True), \
 		     patch.object(permissions.frappe, "get_roles", return_value=["AI Bot"]):
 			self.assertFalse(permissions.ai_bot_has_permission(_Doc("Sales Invoice"), "write", "bot@x.com"))
-			self.assertTrue(permissions.ai_bot_has_permission(_Doc("AI Bot Page"), "write", "bot@x.com"))
+			self.assertTrue(permissions.ai_bot_has_permission(_Doc("Custom User Dashboard"), "write", "bot@x.com"))
 
 	# ---- the hard write guard ----
 	def test_guard_blocks_aibot_off_allowlist(self):
@@ -82,7 +82,7 @@ class TestAiBotPermission(FrappeTestCase):
 
 	def test_guard_allows_aibot_on_allowlist(self):
 		with patch.object(permissions.frappe, "get_roles", return_value=["AI Bot"]):
-			permissions.ai_bot_guard_write(_Doc("AI Bot Page"))  # no raise
+			permissions.ai_bot_guard_write(_Doc("Custom User Dashboard"))  # no raise
 
 	def test_guard_ignores_non_aibot_and_ignore_perms(self):
 		with patch.object(permissions.frappe, "get_roles", return_value=["Sales User"]):
