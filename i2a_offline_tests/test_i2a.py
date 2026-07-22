@@ -15,8 +15,8 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/Users/karthikeyan/frappe-bench-v15/apps/frappe_tools")
-sys.path.insert(0, "/Users/karthikeyan/frappe-bench-v15/apps/essdee")
+sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
+sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/essdee")
 
 from frappe_tools.i2a import engine, providers, verify, extract, match, tools  # noqa: E402
 
@@ -692,7 +692,7 @@ check("bbox serialized json", json.loads(by_key["lr_number"][0]["bbox_json"]) ==
 check("confidence carried", by_key["freight_amount"][0]["confidence"] == 0.99)
 
 print("\n== reference config JSON (manual setup — replaces the seed patch) ==")
-with open("/Users/karthikeyan/frappe-bench-v15/apps/essdee/i2a_config/lr_extraction.json") as fcfg:
+with open("/mnt/storage/dev/frappe-v15/apps/essdee/i2a_config/lr_extraction.json") as fcfg:
 	cfg = json.load(fcfg)
 
 schema = cfg["i2a_action"]["output_schema"]

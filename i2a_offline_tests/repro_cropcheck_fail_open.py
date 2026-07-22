@@ -1,11 +1,11 @@
-"""Repro for finding: crop-back check fails OPEN on ProviderError.
+"""Regression guard (was: crop-back check fails OPEN on ProviderError).
 
 Scenario: use_crop_back_check=1, ocr_repair=0 (free-form path). Free-form
 repair returns a bbox for freight_amount -> assigned + queued. crop_check
 call raises ProviderError (e.g. 400/413 on crop payload after all transport
-attempts). Claim: unconfirmed bbox survives, no rejection remembered,
-mode_degraded untouched -> next round has no bbox_missing deficiency and
-Automated gate Approves the field carrying a never-confirmed bbox.
+attempts). The engine now FAILS CLOSED: the unconfirmed bbox is stripped,
+a crop_back accounting step records it, and next round re-raises
+bbox_missing so the never-confirmed box is never silently approved.
 """
 
 import sys, os
@@ -17,7 +17,7 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/Users/karthikeyan/frappe-bench-v15/apps/frappe_tools")
+sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
 
 from frappe_tools.i2a import engine, providers, verify
 
@@ -37,6 +37,9 @@ class StubState:
         self.steps = []
         self.scripted = scripted
         self.call_log = []
+        # _live_verifier / _mark_verifier_dead read these off the state
+        self.dead_verifiers = set()
+        self.executor_doc = None
 
     def call(self, model, messages, purpose):
         self.call_log.append((purpose, messages))
@@ -46,6 +49,10 @@ class StubState:
             # crop payload specifically.
             raise providers.ProviderError("400 bad request: unsupported image payload")
         return self.scripted[purpose]
+
+    def chat(self, model, purpose, *, session=None, content=None, seed=None):
+        # engine now drives repair via a session chat; stub delegates to call
+        return self.call(model, [], purpose)
 
     def step(self, kind, **data):
         self.steps.append({"step": kind, **data})
@@ -58,6 +65,11 @@ class StubAction:
 
     def parsed_schema(self):
         return [{"key": "freight_amount", "label": "Freight Amount", "required": True, "bbox_required": True}]
+
+
+class StubVerifier:
+    # _live_verifier only needs a `.name`; the stub state ignores the model
+    name = "verifier-model"
 
 
 from PIL import Image
@@ -91,7 +103,7 @@ scripted = {
 state = StubState(scripted)
 action = StubAction()
 
-engine._repair(state, action, executor=None, verifier=None, image_parts=[],
+engine._repair(state, action, executor=None, verifier=StubVerifier(), image_parts=[],
                fields=fields, deficiencies=deficiencies, gctx=gctx)
 
 # --- 1. the crop_check call WAS attempted and failed ---------------------
@@ -99,24 +111,27 @@ check("crop_check call attempted", any(p == "crop_check" for p, _ in state.call_
 check("crop_check_failed step logged",
       any(s["step"] == "crop_check_failed" for s in state.steps), state.steps)
 
-# --- 2. fail-open: unconfirmed bbox survives -----------------------------
-check("UNCONFIRMED bbox survives on item (fail open)", item.get("bbox") is not None, item)
-check("no rejection remembered", not gctx["rejected"], gctx["rejected"])
+# --- 2. FAIL CLOSED (engine fixed): the unconfirmed bbox is stripped ------
+check("UNCONFIRMED bbox stripped on item (fail closed)", item.get("bbox") is None, item)
+check("no rejection remembered (never disproven — may be re-proposed later)",
+      not gctx["rejected"], gctx["rejected"])
 check("mode_degraded NOT set by crop_check failure", state.mode_degraded is False)
-check("no crop_back pass/reject accounting step",
-      not any(s["step"] == "crop_back" for s in state.steps), state.steps)
+check("crop_back accounting step records the stripped box",
+      any(s["step"] == "crop_back"
+          and any(r["field"] == "freight_amount" for r in s.get("rejected", []))
+          for s in state.steps), state.steps)
 
-# --- 3. next round: deterministic_check finds NO bbox_missing ------------
+# --- 3. next round: deterministic_check RE-RAISES bbox_missing -----------
 next_defs = verify.deterministic_check(fields, action.parsed_schema())
-check("next round has ZERO deficiencies (bbox present, value ok)", next_defs == [], next_defs)
+check("next round re-raises bbox_missing (box stripped, value still present)",
+      any(d["kind"] == "bbox_missing" for d in next_defs), next_defs)
 
-# --- 4. gate in Automated mode Approves the field ------------------------
+# --- 4. the never-confirmed bbox is not carried into an approval ---------
 verdict = engine._gate(state, fields, action.parsed_schema(), unresolved=[])
 statuses = [v["status"] for v in verdict["freight_amount"]]
-check("Automated gate APPROVES field with never-confirmed bbox",
-      statuses == ["Approved"], verdict)
-check("approved item still carries the unconfirmed bbox",
-      item.get("bbox") is not None and item.get("status") == "Approved", item)
+check("gate still evaluates the field", statuses == ["Approved"], verdict)
+check("no unconfirmed bbox survives on the item (fail closed)",
+      item.get("bbox") is None, item)
 
 print()
 print(f"{len(PASS)} passed, {len(FAIL)} failed")

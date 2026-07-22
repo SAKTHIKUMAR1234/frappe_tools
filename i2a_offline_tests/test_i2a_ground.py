@@ -17,8 +17,8 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/Users/karthikeyan/frappe-bench-v15/apps/frappe_tools")
-sys.path.insert(0, "/Users/karthikeyan/frappe-bench-v15/apps/essdee")
+sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
+sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/essdee")
 
 from frappe_tools.i2a import engine, ground, providers, verify  # noqa: E402
 

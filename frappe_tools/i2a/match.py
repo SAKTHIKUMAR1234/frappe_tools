@@ -250,6 +250,162 @@ def is_corroborated(target_row, cfg, fields, for_gate=False):
 	return False
 
 
+def resolve_references(cfg, fields, rows):
+	"""Cross-reference consistency check (the careful-clerk rule).
+
+	Corroboration is a per-ROW predicate — `is_corroborated` returns True the
+	moment any one rule links the row to the document. Consistency is a
+	per-DOCUMENT property: nothing else in the pipeline resolves ALL of the
+	document's references independently and asks whether they agree. This does.
+
+	Every extracted reference value is resolved on its own against the fetched
+	candidate rows, then the resolutions are tested for mutual consistency: the
+	document's references can jointly describe at most max(#values per reference
+	kind) records — an EWB that exactly proves invoice A while a bill number on
+	the same document points to a DIFFERENT invoice B is a contradiction the
+	per-row check cannot see.
+
+	Domain-agnostic: reference kinds, strengths and labels all derive from
+	`match_config.corroborate`. Returns None when the feature does not apply
+	(no rules, no reference values, or the `detect_conflicts` kill switch is 0),
+	else a dict {expected, resolutions, union, issues, conflict, reason}. Pure —
+	no frappe DB calls; it operates on the rows the caller already fetched (so
+	date-net-fetched rows participate too)."""
+	rules = cfg.get("corroborate")
+	if not rules or cint(cfg.get("detect_conflicts", 1)) == 0:
+		return None
+
+	# reference kind = each distinct `from` key across the rules; per kind we
+	# split the target_fields the rules match on into exact vs numeric_suffix,
+	# and remember the first label a rule of that kind carries (reason text only)
+	kinds, exact_fields, suffix_fields, labels = [], {}, {}, {}
+	for rule in rules:
+		src, tf = rule.get("from"), rule.get("target_field")
+		if not src or not tf:
+			continue
+		if src not in kinds:
+			kinds.append(src)
+			exact_fields[src], suffix_fields[src], labels[src] = [], [], src
+		if rule.get("label") and labels[src] == src:
+			labels[src] = rule.get("label")
+		if rule.get("match", "exact") == "numeric_suffix":
+			suffix_fields[src].append(tf)
+		else:
+			exact_fields[src].append(tf)
+
+	values = {k: [str(v) for v in _all_values(fields, k)] for k in kinds}
+	if not any(values[k] for k in kinds):
+		return None
+	# the most records the references can JOINTLY describe (one per value of the
+	# richest reference kind); more distinct records than that means disagreement
+	expected = max(len(values[k]) for k in kinds if values[k])
+
+	# resolve every (kind, value) independently against the fetched rows
+	resolutions = []
+	for k in kinds:
+		for v in values[k]:
+			exact, exact_via = [], {}
+			for row in rows:
+				nm = row.get("name")
+				for tf in exact_fields[k]:
+					tval = row.get(tf)
+					if tval in (None, "") or str(tval) != v:
+						continue
+					if nm not in exact:
+						exact.append(nm)
+						exact_via[nm] = tf
+					break
+			suffix, suffix_via = [], {}
+			vnum = _trailing_int(v)
+			if vnum is not None:
+				for row in rows:
+					nm = row.get("name")
+					for tf in suffix_fields[k]:
+						tval = row.get(tf)
+						if tval in (None, ""):
+							continue
+						if _trailing_int(tval) == vnum:
+							if nm not in suffix:
+								suffix.append(nm)
+								suffix_via[nm] = tf
+							break
+			resolutions.append({"kind": k, "label": labels[k], "value": v,
+				"exact": exact, "suffix": suffix, "target": None, "strength": None,
+				"via": None, "_exact_via": exact_via, "_suffix_via": suffix_via, "_dup": False})
+
+	# phase 1 — hard proofs: a lone exact key resolves the reference; the SAME
+	# exact key matching two records is a data contradiction (block everything)
+	issues = []
+	for r in resolutions:
+		if len(r["exact"]) == 1:
+			r["target"], r["strength"] = r["exact"][0], "exact"
+			r["via"] = r["_exact_via"].get(r["target"])
+		elif len(r["exact"]) > 1:
+			r["_dup"] = True
+			names = ", ".join(r["exact"])
+			issues.append({"type": "conflict", "kind": r["kind"], "value": r["value"],
+				"targets": list(r["exact"]),
+				"reason": f"{r['label']} '{r['value']}' exactly matches {len(r['exact'])} "
+					f"different records ({names}) — cannot decide"})
+	proven = {r["target"] for r in resolutions if r["strength"] == "exact"}
+
+	# phase 2 — weak (suffix) resolutions with a pairing tiebreak: a tail that
+	# suffix-matches a record ALREADY proven by an exact key claims no NEW record
+	# (consistent); a lone tail resolves but adds its record; a tail matching
+	# several records with no proof to break the tie is ambiguous (human review)
+	union = set(proven)
+	for r in resolutions:
+		if r["target"] is not None or r["_dup"]:
+			continue
+		paired = [t for t in r["suffix"] if t in proven]
+		if len(paired) == 1:
+			r["target"], r["strength"] = paired[0], "paired"
+			r["via"] = r["_suffix_via"].get(r["target"])
+		elif len(r["suffix"]) == 1:
+			r["target"], r["strength"] = r["suffix"][0], "suffix"
+			r["via"] = r["_suffix_via"].get(r["target"])
+			union.add(r["target"])
+		elif len(r["suffix"]) >= 2:
+			names = ", ".join(r["suffix"])
+			issues.append({"type": "ambiguous", "kind": r["kind"], "value": r["value"],
+				"targets": list(r["suffix"]),
+				"reason": f"{r['label']} '{r['value']}' matches {len(r['suffix'])} records "
+					f"({names}) with no exact key to break the tie — needs human review"})
+		# len == 0 → unresolved: INSUFFICIENT, not conflicting (may be a record
+		# that carries no e-way bill) — no issue, and never auto-applied anyway
+
+	# the count test: more distinct records claimed than the references can
+	# jointly describe → they disagree (leads the reason string with the story)
+	if len(union) > expected:
+		story = "; ".join(
+			f"{r['label']} '{r['value']}' → {r['target']} ({r['strength']} {r['via']})"
+			for r in resolutions if r["target"] in union)
+		issues.insert(0, {"type": "conflict", "kind": None, "value": None,
+			"targets": sorted(union),
+			"reason": (f"references disagree: {story}. These references jointly describe at "
+				f"most {expected} {cfg.get('target_doctype')} record(s) but {len(union)} "
+				f"different ones are claimed — not deciding; needs human review")})
+
+	conflict = any(i["type"] == "conflict" for i in issues)
+	clean = [{"kind": r["kind"], "label": r["label"], "value": r["value"],
+		"target": r["target"], "strength": r["strength"], "via": r["via"],
+		"exact": r["exact"], "suffix": r["suffix"]} for r in resolutions]
+	return {"expected": expected, "resolutions": clean, "union": sorted(union),
+		"issues": issues, "conflict": conflict,
+		"reason": "; ".join(i["reason"] for i in issues) or None}
+
+
+def check_conflict(action, fields, context):
+	"""Convenience wrapper: parse_config + fetch_candidates + resolve_references
+	for callers that hold no candidate rows yet. Returns None when matching is
+	off or the conflict feature does not apply."""
+	cfg = parse_config(action)
+	if not cfg:
+		return None
+	rows = fetch_candidates(cfg, fields, context or {})
+	return resolve_references(cfg, fields, rows)
+
+
 def deterministic_candidates(action, fields, context, limit=8):
 	"""LLM-free match candidates for the review screen: the config's own
 	candidate queries fetch plausible records from the ERP, and each row is
@@ -322,8 +478,21 @@ def deterministic_candidates(action, fields, context, limit=8):
 	strong = [m for m in out if m["matched_value"]]
 	weak = [m for m in out if not m["matched_value"]][:context_rows]
 	matches = strong + weak[:max(0, limit - len(strong))]
-	return {"status": "candidates", "matches": matches,
+	# LEGACY-OFF return {"status": "candidates", "matches": matches,
+	# LEGACY-OFF 	"note": "deterministic candidates — no model call"}
+	# cross-reference consistency: even with zero model calls the document's own
+	# references can disagree (EWB proves A, bill number points to B) — surface
+	# it so nothing downstream auto-applies a side of a contradiction.
+	refs = resolve_references(cfg, fields, rows)
+	result = {"status": "candidates", "matches": matches,
 		"note": "deterministic candidates — no model call"}
+	if refs:
+		result["references"] = refs               # per-reference resolution story for the reviewer
+		if refs["conflict"]:
+			result["status"] = "conflict"
+			result["conflict"] = True
+			result["conflict_reason"] = refs["reason"]
+	return result
 
 
 def _trailing_int(s):
@@ -423,6 +592,34 @@ def run_match(state, action, matcher_model, fields, context):
 		result["status"] = "doubt"
 		result["downgraded"] = "a match lacks exact key corroboration — routed to review"
 	result["corroborated"] = corroborated
+
+	# cross-reference consistency (see resolve_references): corroboration above
+	# is per-row, so a wrongly-picked-but-corroborated record sails through. Here
+	# we resolve EVERY reference independently and test them for mutual agreement.
+	refs = resolve_references(cfg, fields, candidates)
+	if refs:
+		result["references"] = refs
+		picked = {m["target"] for m in result["matches"]}
+		proven = {r["target"] for r in refs["resolutions"] if r.get("strength") == "exact"}
+		# surface deterministically-proven records the model ignored (an exact
+		# EWB proof for A must be visible even when the model only picked B)
+		for r in refs["resolutions"]:
+			if r.get("strength") == "exact" and r["target"] not in picked:
+				result["matches"].append({"target": r["target"], "confidence": 0.95,
+					"reason": f"deterministic proof: exact {r['via']} matches the document's {r['kind']}",
+					"corroborated": True, "proof": True})
+		ambiguous_picked = any(i["type"] == "ambiguous" and picked & set(i.get("targets") or [])
+			for i in refs["issues"])
+		if refs["conflict"] or (proven and (picked - set(refs["union"]))):
+			# references disagree, or the model chose a record no reference
+			# supports while an exact proof points elsewhere — a human decides
+			result["status"] = "conflict"
+			result["conflict_reason"] = refs["reason"] or (
+				"model matched " + ", ".join(sorted(picked - set(refs["union"])))
+				+ " but exact reference proof points to " + ", ".join(sorted(proven)))
+		elif ambiguous_picked and result["status"] == "matched":
+			result["status"] = "doubt"
+			result["downgraded"] = "picked one of several tied candidates — " + refs["reason"]
 
 	state.step(
 		"match",

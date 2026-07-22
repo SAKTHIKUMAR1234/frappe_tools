@@ -1,6 +1,11 @@
-"""Repro for finding: same (field,index) queued twice into crop_back_queue in
-one round -> two identical crops in one crop_check call + contradictory
-passed/rejected accounting + None appended into gctx['rejected'].
+"""Regression guard (was: same (field,index) queued twice into
+crop_back_queue in one round -> two identical crops in one crop_check call
++ contradictory passed/rejected accounting + None appended into
+gctx['rejected']).
+
+The engine now de-dupes crop_back_queue by (field,index): ONE crop per
+claim, a single coherent pass/reject verdict, and a real bbox remembered on
+rejection.
 
 Drives the REAL engine._repair / engine._crop_back_check with stubbed
 state/executor/verifier — no network.
@@ -15,7 +20,7 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/Users/karthikeyan/frappe-bench-v15/apps/frappe_tools")
+sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
 
 from frappe_tools.i2a import engine, ground
 
@@ -36,10 +41,18 @@ class StubState:
         self.steps = []
         self.scripted = scripted  # purpose -> answer
         self.call_log = []
+        # _live_verifier / _mark_verifier_dead read these off the state
+        self.dead_verifiers = set()
+        self.executor_doc = None
 
     def call(self, model, messages, purpose):
         self.call_log.append((purpose, messages))
         return self.scripted[purpose]
+
+    def chat(self, model, purpose, *, session=None, content=None, seed=None):
+        # engine now drives repair via a session chat; stub delegates to call,
+        # preserving the turn content so tests can introspect the crops sent
+        return self.call(model, [{"role": "user", "content": content or []}], purpose)
 
     def step(self, kind, **data):
         self.steps.append({"step": kind, **data})
@@ -53,6 +66,11 @@ class StubAction:
         return [{"key": "freight_amount", "label": "Freight Amount", "required": True, "bbox_required": True}]
 
     request_notes = None
+
+
+class StubVerifier:
+    # _live_verifier only needs a `.name`; the stub state ignores the model
+    name = "verifier-model"
 
 
 # ---- fixture: item with a value but NO bbox, plus a value_disagreement ----
@@ -107,7 +125,7 @@ action = StubAction()
 # ---- drive the REAL _repair (which calls _anchored_bbox_repair,
 #      _freeform_repair and _crop_back_check) --------------------------
 
-engine._repair(state, action, executor=None, verifier=None, image_parts=[],
+engine._repair(state, action, executor=None, verifier=StubVerifier(), image_parts=[],
                fields=fields, deficiencies=deficiencies, gctx=gctx)
 
 # How many crops were sent in the single crop_check call?
@@ -116,18 +134,19 @@ check("one crop_check call made", len(crop_msgs) == 1, len(crop_msgs))
 if crop_msgs:
     user = crop_msgs[0][-1]["content"]
     crop_texts = [c["text"] for c in user if isinstance(c, dict) and c.get("type") == "text" and "CROP" in c.get("text", "")]
-    check("SAME field cropped twice in one call (double spend)",
-          sum("freight_amount" in t for t in crop_texts) == 2, crop_texts)
+    check("field cropped ONCE in the call (de-duped, no double spend)",
+          sum("freight_amount" in t for t in crop_texts) == 1, crop_texts)
 
 crop_back_steps = [s for s in state.steps if s["step"] == "crop_back"]
 check("crop_back step exists", len(crop_back_steps) == 1, state.steps)
 if crop_back_steps:
     s = crop_back_steps[0]
-    both = ({"field": "freight_amount", "index": None} in s["passed"]
-            and any(r["field"] == "freight_amount" for r in s["rejected"]))
-    check("same (field,index) BOTH passed and rejected in one step (trace corruption)", both, s)
+    passed_ok = any(r["field"] == "freight_amount" for r in s["passed"])
+    not_also_rejected = not any(r["field"] == "freight_amount" for r in s["rejected"])
+    check("same (field,index) passed exactly once, not also rejected (coherent trace)",
+          passed_ok and not_also_rejected, s)
 
-check("item bbox nulled despite a recorded pass", item["bbox"] is None, item["bbox"])
+check("item bbox SURVIVES on a recorded pass", item["bbox"] is not None, item["bbox"])
 
 # ---- second sub-scenario: both verdicts reject -> None lands in rejected ----
 
@@ -141,12 +160,13 @@ scripted2["crop_check"] = {"checks": [
 ]}
 state2 = StubState(scripted2)
 
-engine._repair(state2, action, executor=None, verifier=None, image_parts=[],
+engine._repair(state2, action, executor=None, verifier=StubVerifier(), image_parts=[],
                fields=fields2, deficiencies=[dict(d) for d in deficiencies], gctx=gctx2)
 
 rej = gctx2["rejected"].get(("freight_amount", None), [])
-check("double rejection recorded for one box", len(rej) == 2, rej)
-check("None appended into gctx['rejected'] (fingerprint inflation)", None in rej, rej)
+check("single rejection recorded for one box (de-duped)", len(rej) == 1, rej)
+check("a real bbox remembered, not None (no fingerprint inflation)",
+      None not in rej, rej)
 
 print()
 print(f"{len(PASS)} passed, {len(FAIL)} failed")

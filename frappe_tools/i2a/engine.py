@@ -230,7 +230,8 @@ def _run_inner(state, action, files, context):
 		except BudgetExceeded as exc:
 			state.step("budget_stop", at="match", note=str(exc)[:200])
 
-	match_unresolved = bool(match_result and match_result.get("status") in ("doubt", "none", "error"))
+	# LEGACY-OFF match_unresolved = bool(match_result and match_result.get("status") in ("doubt", "none", "error"))
+	match_unresolved = bool(match_result and match_result.get("status") in ("doubt", "none", "error", "conflict"))
 	agent_unresolved = bool(agent_result and not agent_result.get("resolved"))
 
 	verdict = _gate(state, fields, schema, unresolved)
@@ -249,7 +250,7 @@ def _run_inner(state, action, files, context):
 	}
 
 
-def _corroborate_write(action, tool_def, args, fields, context=None):
+def _corroborate_write(action, tool_def, args, fields, context=None, refs=None):
 	"""Deterministic exact-key gate for a finalizing write tool.
 
 	Tool config: "corroborate": {"arg": <arg holding the record name>,
@@ -287,6 +288,21 @@ def _corroborate_write(action, tool_def, args, fields, context=None):
 		hi = str((context or {}).get(elig.get("context_to") or "") or "")
 		if val and ((lo and val < lo) or (hi and val > hi)):
 			return False  # outside the configured eligibility window
+	# document-level consistency: an apply is forbidden while the document's
+	# OWN references disagree, or when this target is one of several tied
+	# candidates for an ambiguous reference. refs may be precomputed by the
+	# caller (once per run); computed here otherwise. Fails CLOSED on error.
+	if refs is None:
+		try:
+			refs = match.check_conflict(action, fields, context)
+		except Exception:
+			return False  # gate declared + cannot evaluate → fail closed
+	if refs:
+		if refs.get("conflict"):
+			return False
+		for issue in refs.get("issues") or []:
+			if issue.get("type") == "ambiguous" and name in (issue.get("targets") or []):
+				return False
 	# for_gate: numeric_suffix alone must NOT authorize an autonomous write
 	# (cross-series suffix collision) unless the action opts in.
 	return bool(match.is_corroborated(row, mcfg, fields, for_gate=True))
@@ -306,6 +322,15 @@ def _deterministic_resolve(state, action, fields, context, catalog):
 	This replaces the agentic tool loop (12 LLM calls/doc resending a growing
 	conversation) with a single extraction call + deterministic code."""
 	cand = match.deterministic_candidates(action, fields, context) or {}
+	refs = (cand or {}).get("references") or {}
+	if refs.get("conflict"):
+		# the document's own references disagree — a careful clerk does not
+		# pick a side; NOTHING is applied and the reason travels to review
+		state.step("reference_conflict", reason=(refs.get("reason") or "")[:300])
+		return {"resolved": False, "applied": False, "applied_targets": [],
+			"flagged": False, "tool_calls": [],
+			"summary": "reference conflict — nothing auto-applied: " + (refs.get("reason") or ""),
+			"match": cand}
 	matches = cand.get("matches") or []
 	fin = next((t for t in catalog
 		if t.get("finalizes") and (t.get("corroborate") or {}).get("arg")), None)
@@ -327,8 +352,12 @@ def _deterministic_resolve(state, action, fields, context, catalog):
 			if ref is None:
 				continue  # a broad-net row with no matched reference — never auto-apply
 			# exactly one candidate for this reference that passes the WRITE gate
+			# LEGACY-OFF gated = [m for m in ms if _corroborate_write(
+			# LEGACY-OFF 	action, fin, {arg: m["target"]}, fields, context) is True]
+			# reuse the refs already resolved above (non-conflict here — conflict
+			# early-returns) so the gate does not re-run check_conflict per candidate
 			gated = [m for m in ms if _corroborate_write(
-				action, fin, {arg: m["target"]}, fields, context) is True]
+				action, fin, {arg: m["target"]}, fields, context, refs=refs) is True]
 			if len(gated) != 1:
 				continue  # zero or ambiguous → human review
 			target = gated[0]["target"]
@@ -433,6 +462,17 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 				system, "Extracted document fields:\n" + json.dumps(values, default=str, indent=1))},
 		]
 
+	# Cross-reference consistency computed ONCE for the whole run (one fetch),
+	# logged, and passed into every write gate below. Under a conflict the model
+	# is refused any finalizing apply and told to flag with the reason instead.
+	refs = None
+	try:
+		refs = match.check_conflict(action, fields, context)
+	except Exception as exc:
+		state.step("conflict_check_failed", error=str(exc)[:200])
+	if refs and refs.get("conflict"):
+		state.step("reference_conflict", reason=(refs.get("reason") or "")[:300])
+
 	calls_made = []
 	applied = False   # a finalizing write succeeded (e.g. apply_lr_to_invoice)
 	applied_targets = []  # every record a finalizing write landed on (one per reference)
@@ -490,12 +530,18 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 			elif flagged and tool_def.get("finalizes"):
 				result = {"error": "skipped: this document was already escalated to a human "
 					"in this round — no further applies"}
+			elif tool_def.get("finalizes") and refs and refs.get("conflict"):
+				# the document's own references disagree — refuse EVERY apply and
+				# hand the model the exact reason to pass through to the flag tool
+				result = {"error": "conflict — do NOT apply any record: "
+					+ (refs.get("reason") or "")[:400]
+					+ " A human must decide; call the review/flag tool now and pass this exact reason as `reason`."}
 			else:
 				# Deterministic gate on finalizing writes: the model's confidence is
 				# NOT an enforcement boundary — the chosen record must share an exact
 				# key with the extracted document (prompt-injected text in a scanned
 				# image must never be able to steer an apply to a foreign record).
-				gate = _corroborate_write(action, tool_def, tc["arguments"], fields, context)
+				gate = _corroborate_write(action, tool_def, tc["arguments"], fields, context, refs=refs)
 				if gate is False:
 					result = {"error": "corroboration failed: the chosen record shares no exact key "
 						"with this document (or is outside the eligibility window) — do NOT apply; "
