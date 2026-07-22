@@ -38,4 +38,8 @@ def get_context(context):
 	context.page_title = dashboard.title
 	context.ai_html = dashboard.html_content or ""
 	context.show_sidebar = False
+	# Render edge-to-edge: drop the Bootstrap .container (max-width ~1140px) that
+	# templates/web.html wraps page_content in, so the dashboard fills the full
+	# viewport width (same flag the Web Page doctype exposes as "Full Width").
+	context.full_width = 1
 	return context
