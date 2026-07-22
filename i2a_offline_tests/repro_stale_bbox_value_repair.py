@@ -1,10 +1,12 @@
-"""Verify finding: value repaired without a new bbox is never crop-back-queued.
+"""Regression guard (was: value repaired without a new bbox never
+crop-back-queued -> new value survives anchored to the OLD rectangle).
 
 Scenario: use_crop_back_check=1, use_verify_crops=0. Item freight_amount has
 value 554 with a bbox (from extraction). Verifier flags value_disagreement
 (image shows 654). Free-form repair returns value=654 with bbox=null.
-Claim: nothing is queued -> _crop_back_check never called -> new value 654
-survives anchored to the OLD rectangle.
+The engine now treats a new value under the old box as a changed claim and
+crop-back-re-proves it; the verifier disproves the box, so it is stripped
+and re-surfaces next round as bbox_missing.
 """
 
 import sys, os
@@ -16,7 +18,7 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/Users/karthikeyan/frappe-bench-v15/apps/frappe_tools")
+sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
 
 from frappe_tools.i2a import engine
 
@@ -35,10 +37,18 @@ class StubState:
         self.steps = []
         self.scripted = scripted
         self.call_log = []
+        # _live_verifier / _mark_verifier_dead read these off the state
+        self.dead_verifiers = set()
+        self.executor_doc = None
 
     def call(self, model, messages, purpose):
         self.call_log.append((purpose, messages))
         return self.scripted[purpose]
+
+    def chat(self, model, purpose, *, session=None, content=None, seed=None):
+        # engine now drives repair via a session chat; stub delegates to call,
+        # preserving the turn content so tests can introspect the crops sent
+        return self.call(model, [{"role": "user", "content": content or []}], purpose)
 
     def step(self, kind, **data):
         self.steps.append({"step": kind, **data})
@@ -51,6 +61,11 @@ class StubAction:
 
     def parsed_schema(self):
         return [{"key": "freight_amount", "label": "Freight Amount", "required": True, "bbox_required": True}]
+
+
+class StubVerifier:
+    # _live_verifier only needs a `.name`; the stub state ignores the model
+    name = "verifier-model"
 
 
 from PIL import Image
@@ -86,36 +101,44 @@ scripted = {
 }
 
 state = StubState(scripted)
-engine._repair(state, StubAction(), executor=None, verifier=None, image_parts=[],
+engine._repair(state, StubAction(), executor=None, verifier=StubVerifier(), image_parts=[],
                fields=fields, deficiencies=deficiencies, gctx=gctx)
 
 check("repair applied the new value", item["value"] == 654, item)
-check("old bbox survived unchanged on the item", item["bbox"] == OLD_BBOX, item)
+# a new value under the OLD box is a changed claim — the engine now re-proves
+# it via crop-back; the verifier disproves it, so the stale box is stripped.
+check("stale box NOT left unchanged — it is re-proven and stripped on disproof",
+      item["bbox"] is None, item)
 
 crop_calls = [p for p, m in state.call_log if p == "crop_check"]
-check("crop_check was NEVER called (nothing queued)", len(crop_calls) == 0, state.call_log)
+check("crop_check WAS called to re-prove the changed claim",
+      len(crop_calls) == 1, state.call_log)
 
 crop_back_steps = [s for s in state.steps if s["step"] == "crop_back"]
-check("no crop_back step logged", len(crop_back_steps) == 0, state.steps)
+check("crop_back step logged with the box rejected",
+      len(crop_back_steps) == 1
+      and any(r["field"] == "freight_amount"
+              for r in (crop_back_steps[0].get("rejected") if crop_back_steps else [])),
+      state.steps)
 
-check("item marked repaired=1 yet its surviving bbox was never re-proven",
-      item.get("repaired") == 1 and item["bbox"] == OLD_BBOX, item)
+check("item marked repaired=1 and its box was re-proven (stripped on disproof)",
+      item.get("repaired") == 1 and item["bbox"] is None, item)
 
-# --- next-round check: does anything downstream flag the stale box? --------
+# --- next-round check: the stripped box re-surfaces as bbox_missing --------
 from frappe_tools.i2a import verify as vmod
 
 schema = StubAction().parsed_schema()
 next_round = []
 next_round += vmod.apply_formats(fields, schema)
 next_round += vmod.deterministic_check(fields, schema)
-check("next-round deterministic checks raise NOTHING (bbox present, no collision)",
-      next_round == [], next_round)
+check("next-round deterministic check re-raises bbox_missing (box stripped)",
+      any(d["kind"] == "bbox_missing" for d in next_round), next_round)
 
 # verify prompt next round (use_verify_crops=0): claim text has value/raw_text
-# only — no coordinates, no crop — so the verifier cannot see the stale region.
+# only — no coordinates, no crop.
 msgs = vmod.build_verify_messages(StubAction(), [], fields, crops=[])
 claim_text = msgs[1]["content"][0]["text"]
-check("verify claim shows the NEW value with no crop/coords to expose the stale box",
+check("verify claim shows the NEW value with no crop/coords",
       "654" in claim_text and "CROP" not in claim_text and "0.7" not in claim_text, claim_text)
 
 print()
