@@ -13,6 +13,13 @@ data), so bake everything the viewer should see directly into the HTML.
 You may only create and manage **your own** dashboards. You have read access to
 the rest of the site's data to build them, but you cannot write anything else.
 
+> **Role requirement.** The **AI Bot** role is READ-ONLY on every DocType — it
+> cannot create dashboards. Creating/editing dashboards requires the separate
+> **Custom User Dashboard Manager** role, which the operator assigns to your
+> user (typically alongside AI Bot, which supplies the read access). If a
+> `create_dashboard`/`update_dashboard` call returns a permission error, your
+> user is missing that role — ask the operator to add it.
+
 All calls are Frappe REST endpoints:
 `POST /api/method/<method>` with `Content-Type: application/json`, authenticated
 with your API key/secret (`Authorization: token <key>:<secret>`). The result is

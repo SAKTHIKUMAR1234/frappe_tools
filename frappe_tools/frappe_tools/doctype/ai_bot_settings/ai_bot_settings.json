@@ -4,23 +4,16 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "write_section",
-  "write_allowed_doctypes",
+  "info_section",
   "section_break_info",
   "protected_doctypes"
  ],
  "fields": [
   {
-   "fieldname": "write_section",
+   "fieldname": "info_section",
    "fieldtype": "Section Break",
-   "label": "Write-Allowed DocTypes",
-   "description": "AI Bot is DENIED write/create/delete on every DocType except those listed here. Add a DocType to let the AI Bot write it (e.g. Custom User Dashboard). Everything else is read-only for the AI Bot, enforced at the permission-hook level."
-  },
-  {
-   "fieldname": "write_allowed_doctypes",
-   "fieldtype": "Table",
-   "label": "Write-Allowed DocTypes",
-   "options": "AI Bot Writable DocType"
+   "label": "AI Bot Role",
+   "description": "The AI Bot role is READ-ONLY on every DocType and Report — it never grants write, create or delete. Write functionality (e.g. creating Custom User Dashboards) lives on a SEPARATE role ('Custom User Dashboard Manager') that you assign to a dedicated user."
   },
   {
    "fieldname": "section_break_info",
@@ -38,7 +31,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-28 00:00:00.000000",
+ "modified": "2026-07-21 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "AI Bot Settings",

@@ -288,6 +288,6 @@ after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions
 fixtures =[
         {
             'dt' : 'Role',
-            'filters' : [['name', 'in', ['Scanner User', 'AI Bot']]]
+            'filters' : [['name', 'in', ['Scanner User', 'AI Bot', 'Custom User Dashboard Manager']]]
         }
     ]
