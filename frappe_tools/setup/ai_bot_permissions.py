@@ -1,4 +1,5 @@
 import frappe
+from frappe.cache_manager import clear_user_cache
 
 
 ROLE_NAME = "AI Bot"
@@ -42,7 +43,17 @@ def setup_ai_bot_permissions():
 	setup_report_permissions()
 	setup_page_permissions()
 	setup_dashboard_manager_permissions()
-	frappe.clear_cache()
+	_clear_permission_caches()
+
+
+def _clear_permission_caches():
+	"""Invalidate permission metadata without evicting active sessions.
+
+	``clear_user_cache`` clears role, report/page, DocType and global metadata
+	caches used by the permission checks. Unlike ``frappe.clear_cache()``, it
+	does not delete the site's Redis ``session`` hash.
+	"""
+	clear_user_cache()
 
 
 # ---------------- Dashboard-manager role (write path) ------------------------
