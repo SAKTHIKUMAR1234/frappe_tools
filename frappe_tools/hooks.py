@@ -292,9 +292,12 @@ after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions
 # hash keeps valid users signed in without extending expired sessions.
 persistent_cache_keys = ["session"]
 
+# Keep AI Bot out of Role fixtures. Frappe deletes and reinserts fixtures on
+# every migration; reinserting a non-Desk role force-clears sessions for its
+# assigned System Users. setup_ai_bot_permissions() creates AI Bot when absent.
 fixtures =[
         {
             'dt' : 'Role',
-            'filters' : [['name', 'in', ['Scanner User', 'AI Bot', 'Custom User Dashboard Manager']]]
+            'filters' : [['name', 'in', ['Scanner User', 'Custom User Dashboard Manager']]]
         }
     ]
