@@ -129,9 +129,9 @@ has_permission = {
 # ---------------
 # Override standard doctype classes
 
-override_doctype_class = {
-	"Role": "frappe_tools.overrides.role.Role",
-}
+# override_doctype_class = {
+# 	"ToDo": "custom_app.overrides.CustomToDo"
+# }
 
 # Document Events
 # ---------------
@@ -284,13 +284,3 @@ scheduler_events = {
 # are cached per gunicorn worker, so the DB change isn't visible until workers
 # recycle.
 after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
-
-# Keep AI Bot out of Role fixtures. Frappe deletes and reinserts fixtures on
-# every migration; reinserting a non-Desk role force-clears sessions for its
-# assigned System Users. setup_ai_bot_permissions() creates AI Bot when absent.
-fixtures =[
-        {
-            'dt' : 'Role',
-            'filters' : [['name', 'in', ['Scanner User', 'Custom User Dashboard Manager']]]
-        }
-    ]

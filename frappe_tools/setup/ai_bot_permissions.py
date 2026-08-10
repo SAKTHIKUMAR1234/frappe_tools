@@ -3,6 +3,7 @@ from frappe.cache_manager import clear_user_cache
 
 
 ROLE_NAME = "AI Bot"
+SCANNER_ROLE = "Scanner User"
 SETTINGS_DOCTYPE = "AI Bot Settings"
 BATCH_SIZE = 200
 
@@ -37,6 +38,7 @@ def setup_ai_bot_permissions():
 	gratuitously trigger the override.
 	"""
 	ensure_role_exists()
+	ensure_scanner_role()
 	protected = _get_protected_doctypes()
 	cleanup_ai_bot_rows(protected_doctypes=protected)
 	setup_doctype_permissions(protected_doctypes=protected)
@@ -70,26 +72,39 @@ _MANAGER_PTYPES = ("read", "write", "create", "delete", "report", "print", "emai
 
 
 def ensure_role_exists():
-	"""Create the AI Bot role if it doesn't exist yet."""
-	if frappe.db.exists("Role", ROLE_NAME):
-		return
+	"""Create or update the AI Bot role without importing a Role fixture."""
+	ensure_role(ROLE_NAME, desk_access=0)
+
+
+def ensure_scanner_role():
+	"""Create or update the Scanner User role without importing a Role fixture."""
+	ensure_role(SCANNER_ROLE, desk_access=1)
+
+
+def ensure_role(role_name, desk_access, home_page=None):
+	"""Apply a Role definition in place; never delete an existing Role."""
+	if frappe.db.exists("Role", role_name):
+		role = frappe.get_doc("Role", role_name)
+		changed = False
+		for fieldname, value in {"desk_access": desk_access, "home_page": home_page}.items():
+			if role.get(fieldname) != value:
+				role.set(fieldname, value)
+				changed = True
+		if changed:
+			role.save(ignore_permissions=True)
+		return role
+
 	role = frappe.new_doc("Role")
-	role.role_name = ROLE_NAME
-	role.desk_access = 0
+	role.role_name = role_name
+	role.desk_access = desk_access
+	role.home_page = home_page
 	role.insert(ignore_permissions=True)
-	frappe.db.commit()
+	return role
 
 
 def ensure_dashboard_manager_role():
-	"""Create the Custom User Dashboard Manager role if it doesn't exist yet.
-	Needs desk access so an assigned user can reach the dashboard doctype UI."""
-	if frappe.db.exists("Role", DASHBOARD_MANAGER_ROLE):
-		return
-	role = frappe.new_doc("Role")
-	role.role_name = DASHBOARD_MANAGER_ROLE
-	role.desk_access = 1
-	role.insert(ignore_permissions=True)
-	frappe.db.commit()
+	"""Ensure the dashboard manager can reach the dashboard doctype UI."""
+	return ensure_role(DASHBOARD_MANAGER_ROLE, desk_access=1)
 
 
 def setup_dashboard_manager_permissions():
