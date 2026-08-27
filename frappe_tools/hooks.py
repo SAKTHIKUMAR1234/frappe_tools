@@ -284,17 +284,3 @@ scheduler_events = {
 # are cached per gunicorn worker, so the DB change isn't visible until workers
 # recycle.
 after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
-
-# Frappe's global cache clear runs at the start of every migration. Sessions
-# are durable in tabSessions, but evicting the Redis session hash can still
-# log out a user when that database fallback is temporarily missing or stale.
-# Session payloads enforce their own expiry when resumed, so preserving this
-# hash keeps valid users signed in without extending expired sessions.
-persistent_cache_keys = ["session"]
-
-fixtures =[
-        {
-            'dt' : 'Role',
-            'filters' : [['name', 'in', ['Scanner User', 'AI Bot', 'Custom User Dashboard Manager']]]
-        }
-    ]
