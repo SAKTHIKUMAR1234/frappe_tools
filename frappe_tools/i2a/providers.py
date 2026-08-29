@@ -332,12 +332,34 @@ def _api_error(result):
 
 
 def _redact_images(body):
+	"""Redact every embedded media payload from persisted provider audits."""
 	clone = json.loads(json.dumps(body))
 	for message in clone.get("messages", []):
 		content = message.get("content")
 		if isinstance(content, list):
 			for part in content:
-				if isinstance(part, dict) and part.get("type") == "image_url":
+				if not isinstance(part, dict):
+					continue
+				part_type = part.get("type")
+				if part_type == "image_url":
 					url = (part.get("image_url") or {}).get("url", "")
 					part["image_url"] = {"url": f"<image redacted: {len(url)} chars>"}
+				elif part_type == "input_audio":
+					audio = part.get("input_audio") or {}
+					data = str(audio.get("data") or "")
+					part["input_audio"] = {
+						"data": f"<audio redacted: {len(data)} chars>",
+						"format": audio.get("format"),
+					}
+				elif part_type == "file":
+					file_part = part.get("file") or {}
+					data = str(file_part.get("file_data") or "")
+					part["file"] = {
+						"filename": file_part.get("filename"),
+						"file_data": f"<file redacted: {len(data)} chars>",
+					}
+				elif part_type == "video_url":
+					video = part.get("video_url") or {}
+					url = str(video.get("url") or "")
+					part["video_url"] = {"url": f"<video redacted: {len(url)} chars>"}
 	return clone
