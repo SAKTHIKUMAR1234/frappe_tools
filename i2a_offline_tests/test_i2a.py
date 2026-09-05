@@ -7,6 +7,7 @@ and a scripted model. No site, no network, no production touch.
 import json
 import sys
 import os
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -15,8 +16,9 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
-sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/essdee")
+APPS_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(APPS_DIR / "frappe_tools"))
+sys.path.insert(0, str(APPS_DIR / "essdee"))
 
 from frappe_tools.i2a import engine, providers, verify, extract, match, tools  # noqa: E402
 
@@ -123,7 +125,7 @@ def run_engine(script, mode=None, files=None):
 		result = engine.run(
 			"LR Extraction",
 			files=files if files is not None else [b"fakeimagebytes"],
-			context={"batch": "BATCH-1"},
+			context={"batch": "BATCH-1", "date_from": "2026-01-01", "date_to": "2026-12-31"},
 			mode=mode,
 			reference=("LR Processing Batch", "BATCH-1"),
 			reference_detail="entry-row-1",
@@ -438,6 +440,16 @@ defsm = verify.cross_check(fieldsm, LR_SCHEMA, {})
 check("ewb miss flagged", any(d["kind"] == "cross_check_miss" for d in defsm))
 check("miss marked on item", fieldsm["eway_bills"][0].get("cross_check") == "miss")
 
+date_window_schema = [dict(field, date_window={"from": "date_from", "to": "date_to"})
+	if field["key"] == "lr_date" else field for field in LR_SCHEMA]
+date_fields, _ = verify.whitelist(full_extraction(lr_date=make_item("2020-08-17", "17/8/20")), date_window_schema)
+verify.apply_formats(date_fields, date_window_schema)
+date_defs = verify.cross_check(
+	date_fields, date_window_schema, {"date_from": "2026-06-30", "date_to": "2026-09-01"}
+)
+check("date outside operational context is rejected",
+	any(d["kind"] == "date_out_of_range" for d in date_defs))
+
 print("\n== unit: verify._render_filters ==")
 rendered = verify._render_filters(
 	{"customer": "{lr_number}", "batch": "{context.batch}", "docstatus": 1},
@@ -460,6 +472,9 @@ check("manual → all Pending", all(
 ))
 check("route shortcut (no route call)", all(c["purpose"] != "route" for c in sm.calls))
 check("verify ran (rules set)", any(c["purpose"] == "verify" for c in sm.calls))
+extract_call = next(c for c in sm.calls if c["purpose"] == "extract")
+check("operational date window reaches extraction prompt",
+	"date_from=2026-01-01" in json.dumps(extract_call["messages"]))
 run_doc = FRAPPE.get_doc("I2A Run", result["run"])
 check("run finalized Completed", run_doc.status == "Completed")
 check("totals from call rows", run_doc.total_tokens == 100 * len(sm.calls), f"{run_doc.total_tokens} vs {100*len(sm.calls)}")
@@ -503,6 +518,23 @@ result, sm = run_engine({
 check("status Completed", result["status"] == "Completed", result.get("status"))
 check("missing value materialized", result["fields"]["freight_amount"] and result["fields"]["freight_amount"]["value"] == 554.0,
 	str(result["fields"].get("freight_amount")))
+
+print("\n== e2e: repair materializes every item in a missing required array ==")
+required_bill_schema = [dict(field, required=True) if field["key"] == "bill_numbers" else field for field in LR_SCHEMA]
+setup_world(mode="Manual", schema=required_bill_schema)
+result, sm = run_engine({
+	"extract": [full_extraction(bill_numbers=[])],
+	"verify": [{"disagreements": []}, {"disagreements": []}],
+	"repair": [{"repairs": [
+		{"field": "bill_numbers", "index": 0, "value": "3017", "raw_text": "3017", "confidence": 0.9, "bbox": [400, 100, 430, 160]},
+		{"field": "bill_numbers", "index": 1, "value": "3016", "raw_text": "3016", "confidence": 0.9, "bbox": [440, 100, 470, 160]},
+		{"field": "bill_numbers", "index": 2, "value": "3009", "raw_text": "3009", "confidence": 0.9, "bbox": [480, 100, 510, 160]},
+	]}],
+})
+check("required array repaired to Completed", result["status"] == "Completed", result.get("status"))
+check("all missing array items materialized",
+	[item["value"] for item in result["fields"]["bill_numbers"]] == ["3017", "3016", "3009"],
+	str(result["fields"].get("bill_numbers")))
 
 print("\n== e2e: hostile verifier indexes don't crash / don't bypass gate ==")
 setup_world(mode="Automated")
@@ -646,6 +678,40 @@ providers.call_model(m, [{"role": "user", "content": [
 row = FRAPPE.get_all("I2A LLM Call")[0]
 check("image redacted in log", "redacted" in row.get("request_payload") and "AAAA" not in row.get("request_payload"))
 
+print("\n== providers: OpenAI Responses API ==")
+m = provider_world()
+m.db_set("provider", "OpenAI")
+m.db_set("model_id", "gpt-5.6-luna")
+responses_body = {
+	"status": "completed",
+	"output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps({"lr_number": "ABC-1"})}]}],
+	"usage": {"input_tokens": 20, "output_tokens": 7, "total_tokens": 27},
+}
+REQUESTS.script[:] = [fake_frappe.FakeRequests._Resp(200, responses_body)]
+out = providers.call_model(m, [{"role": "user", "content": [
+	{"type": "text", "text": "extract"},
+	{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + "B" * 5000}},
+]}], purpose="extract")
+check("Responses JSON parsed", out["data"] == {"lr_number": "ABC-1"})
+body = REQUESTS.calls[-1]["body"]
+check("Responses endpoint payload", body.get("store") is False and body.get("model") == "gpt-5.6-luna")
+check("Responses image translated", body["input"][0]["content"][1]["type"] == "input_image")
+row = FRAPPE.get_all("I2A LLM Call")[0]
+check("Responses tokens normalized", row.get("prompt_tokens") == 20 and row.get("completion_tokens") == 7)
+check("Responses image redacted", "redacted" in row.get("request_payload") and "BBBB" not in row.get("request_payload"))
+
+m = provider_world()
+m.db_set("provider", "OpenAI")
+m.db_set("model_id", "gpt-5.6-luna")
+tool_body = {"status": "completed", "output": [{"type": "function_call", "call_id": "call_1",
+	"name": "lookup_invoice", "arguments": json.dumps({"invoice": "INV-7"})}],
+	"usage": {"input_tokens": 9, "output_tokens": 3, "total_tokens": 12}}
+REQUESTS.script[:] = [fake_frappe.FakeRequests._Resp(200, tool_body)]
+out = providers.call_with_tools(m, [{"role": "user", "content": "find it"}], [{"type": "function",
+	"function": {"name": "lookup_invoice", "description": "Lookup", "parameters": {"type": "object"}}}], purpose="agent")
+check("Responses function call parsed", out["tool_calls"] == [{"id": "call_1", "name": "lookup_invoice", "arguments": {"invoice": "INV-7"}}])
+check("Responses tool schema translated", REQUESTS.calls[-1]["body"]["tools"][0].get("name") == "lookup_invoice")
+
 # ============================================================ essdee adapter
 
 print("\n== essdee adapter: map_results ==")
@@ -691,13 +757,66 @@ check("engine status carried", by_key["lr_number"][0]["status"] == "Approved" an
 check("bbox serialized json", json.loads(by_key["lr_number"][0]["bbox_json"]) == {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.03})
 check("confidence carried", by_key["freight_amount"][0]["confidence"] == 0.99)
 
+repaired_date_row = lr_i2a.map_results({"fields": {"lr_date": {
+	"value": "2026-08-17", "raw_text": "17/8/20", "repaired": 1, "status": "Pending",
+}}})[0]
+check("adapter preserves operational-year repair", repaired_date_row["value"] == "2026-08-17")
+
+guarded_rows = lr_i2a.map_results({"fields": {
+	"lr_number": {"value": "U60221PB2020PTC051436", "raw_text": "U60221PB2020PTC051436", "status": "Pending"},
+	"eway_bills": [
+		{"value": "0372011", "raw_text": "03AATCA7201M1ZJ", "status": "Pending"},
+		{"value": "000000000000", "raw_text": "000000000000", "status": "Pending"},
+	],
+}})
+check("CIN-shaped LR number deterministically rejected", guarded_rows[0]["status"] == "Rejected")
+check("invalid and all-zero EWB values deterministically rejected",
+	all(row["status"] == "Rejected" for row in guarded_rows if row["field_key"] == "eway_bill"))
+
+split_rows = lr_i2a.map_results({"fields": {"bill_numbers": [
+	{"value": "3009/3016/3017", "raw_text": "3009/3016/3017", "status": "Pending"},
+	{"value": "3/73", "raw_text": "3/73", "status": "Pending"},
+	{"value": "ABC/2526/0123", "raw_text": "ABC/2526/0123", "status": "Pending"},
+]}})
+check("unambiguous numeric bill list split into separate references",
+	[row["value"] for row in split_rows[:3]] == ["3009", "3016", "3017"])
+check("short slash reference and alphanumeric series preserved",
+	[row["value"] for row in split_rows[3:]] == ["3/73", "ABC/2526/0123"])
+
+check("verifier explicit Match row is not a disagreement",
+	engine._verifier_report_is_agreement({"reason": "Match", "expected": "918106"},
+		{"value": "918106"}, {"format": "strip-spaces"}))
+check("verifier day-first printed date equals canonical ISO value",
+	engine._verifier_report_is_agreement({"reason": "Date format mismatch", "expected": "13/08/2026"},
+		{"value": "2026-08-13"}, {"format": "date:indian-ddmmyyyy"}))
+check("verifier real spelling mismatch remains a disagreement",
+	not engine._verifier_report_is_agreement({"reason": "Spelling mismatch", "expected": "HOSRIERY"},
+		{"value": "HOSIERY"}, {}))
+check("invalid expected EWB cannot be treated as canonical agreement",
+	not engine._verifier_report_is_agreement({"reason": "Format mismatch", "expected": "00592054058855"},
+		{"value": "00592054058855"}, {"format": "digits:12"}))
+
+quality_schema = [{"key": "document_status", "finalize_allow_values": ["clear"]}]
+check("clear document passes finalization constraint",
+	engine._finalize_constraints_pass({"document_status": {"value": "clear"}}, quality_schema))
+check("review document blocks finalization constraint",
+	not engine._finalize_constraints_pass({"document_status": {"value": "needs_review"}}, quality_schema))
+check("missing document status blocks finalization constraint",
+	not engine._finalize_constraints_pass({}, quality_schema))
+check("schemas without finalization constraints remain compatible",
+	engine._finalize_constraints_pass({}, [{"key": "lr_number"}]))
+
 print("\n== reference config JSON (manual setup — replaces the seed patch) ==")
-with open("/mnt/storage/dev/frappe-v15/apps/essdee/i2a_config/lr_extraction.json") as fcfg:
+config_path = Path(__file__).resolve().parents[2] / "essdee" / "i2a_config" / "lr_extraction.json"
+with config_path.open(encoding="utf-8") as fcfg:
 	cfg = json.load(fcfg)
 
 schema = cfg["i2a_action"]["output_schema"]
-check("8 fields", len(schema) == 8)
+check("10 fields", len(schema) == 10)
 check("every entry has key", all(f.get("key") for f in schema))
+document_status = next(f for f in schema if f["key"] == "document_status")
+check("only visually clear documents may finalize",
+	document_status.get("finalize_allow_values") == ["clear"])
 check("no cross_check on bill_numbers", not next(f for f in schema if f["key"] == "bill_numbers").get("cross_check"))
 ewb = next(f for f in schema if f["key"] == "eway_bills")
 check("ewb cross_check pins docstatus", ewb["cross_check"]["filters_template"] == {"docstatus": 1})
@@ -711,10 +830,13 @@ check("exactly one orchestrator row", sum(m.get("is_orchestrator", 0) for m in c
 check("exactly one verifier row (qwen)", sum(m.get("is_verifier", 0) for m in cfg["i2a_action"]["models"]) == 1)
 check("model rows reference declared ai_models", {m["ai_model"] for m in cfg["i2a_action"]["models"]} == {m["model_label"] for m in cfg["ai_models"]})
 check("remarks present on every model row", all(m.get("remarks") for m in cfg["i2a_action"]["models"]))
-# grounding OFF for LR (2026-07-20): the OCR-snap / crop-back re-grounding
-# relocated boxes off the value; the vision model's own boxes render correctly
-# (validated in the legacy pipeline), so LR trusts them directly.
-check("grounding flags off (trust model boxes)", all(cfg["i2a_action"].get(k, 0) == 0 for k in ("use_ocr_anchored_repair", "use_crop_back_check", "use_verify_crops", "use_bbox_snap")))
+# The fail-closed repair/crop pipeline now strips unproven repaired boxes and
+# per-claim crops verify the original model boxes. Bbox snap remains disabled:
+# unlike repair, it can relocate an otherwise usable model box without a crop
+# proof and was the source of the historical LR regression.
+check("fail-closed grounding enabled", all(cfg["i2a_action"].get(k, 0) == 1 for k in ("use_ocr_anchored_repair", "use_crop_back_check", "use_verify_crops")))
+check("bbox snap remains off", cfg["i2a_action"].get("use_bbox_snap", 0) == 0)
+check("model verify enabled for per-claim crops", cfg["i2a_action"].get("skip_model_verify", 0) == 0)
 check("settings link block present", cfg["essdee_application_settings"]["lr_i2a_action"] == cfg["i2a_action"]["action_name"])
 # the action block must satisfy the real controller's validate() constraints
 check("mode valid", cfg["i2a_action"]["mode"] in ("Manual", "Automated"))
@@ -1153,6 +1275,7 @@ class _DRAct:
 
 class _DRState:
     def __init__(self):
+        self.mode = "Automated"
         self.run_doc = fake_frappe.FakeRow({
             "reference_doctype": "LR Processing Batch", "reference_name": "B1",
             "reference_detail": "E1", "name": "RUN1"})
@@ -1175,6 +1298,20 @@ _dr = engine._deterministic_resolve(_DRState(), _DRAct(),
 check("exact-key reference auto-applied in code", _dr_applied == ["SI-0001"], str(_dr_applied))
 check("fully resolved (all references covered)", _dr["resolved"] is True, str(_dr))
 check("no LLM purpose recorded (deterministic)", "tool_calls" in _dr and all(c.get("tool") for c in _dr["tool_calls"]))
+
+# Manual/degraded/unresolved runs may compute the same exact candidate for the
+# review UI, but must never execute the finalizing write tool.
+_dr_applied.clear()
+_blocked_state = _DRState()
+_blocked_state.mode = "Manual"
+_dr_blocked = engine._deterministic_resolve(
+	_blocked_state, _DRAct(), full_extraction(bill_numbers=[]), {},
+	tools.parse_catalog(_DRAct()), allow_finalize=False,
+)
+check("manual/unresolved deterministic resolution never writes", _dr_applied == [], str(_dr_applied))
+check("blocked finalization remains unresolved for review", _dr_blocked["resolved"] is False, str(_dr_blocked))
+check("blocked finalization is logged",
+	any(step["step"] == "finalize_blocked" for step in _blocked_state.steps), str(_blocked_state.steps))
 
 # suffix-only doc (no e-way) → NOT auto-applied (gate excludes suffix) → review
 _dr_applied.clear()

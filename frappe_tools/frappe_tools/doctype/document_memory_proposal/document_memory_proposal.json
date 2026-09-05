@@ -1,0 +1,21 @@
+{
+ "actions": [], "autoname": "DMEM-.#####", "doctype": "DocType", "engine": "InnoDB",
+ "field_order": ["status", "extraction", "adapter_id", "path", "category", "scope_key", "model_value", "agent_value", "human_value", "reason", "reviewed_by", "reviewed_on"],
+ "fields": [
+  {"default":"Pending","fieldname":"status","fieldtype":"Select","in_list_view":1,"label":"Status","options":"Pending\nApproved\nRejected\nApplied","read_only":1},
+  {"fieldname":"extraction","fieldtype":"Link","in_list_view":1,"label":"Extraction","options":"Document Extraction","reqd":1,"read_only":1},
+  {"fieldname":"adapter_id","fieldtype":"Data","label":"Adapter","reqd":1,"read_only":1},
+  {"fieldname":"path","fieldtype":"Data","in_list_view":1,"label":"Field/Row Path","reqd":1,"read_only":1},
+  {"fieldname":"category","fieldtype":"Select","label":"Learning Category","options":"OCR\nIdentity\nTaxonomy\nAccounting\nPolicy","reqd":1,"read_only":1},
+  {"fieldname":"scope_key","fieldtype":"Data","label":"Scope","read_only":1},
+  {"fieldname":"model_value","fieldtype":"Long Text","label":"OCR Value","read_only":1},
+  {"fieldname":"agent_value","fieldtype":"Long Text","label":"Agent Value","read_only":1},
+  {"fieldname":"human_value","fieldtype":"Long Text","label":"Human-confirmed Value","read_only":1},
+  {"fieldname":"reason","fieldtype":"Small Text","label":"Proposed Learning Reason","read_only":1},
+  {"fieldname":"reviewed_by","fieldtype":"Link","label":"Reviewed By","options":"User","read_only":1},
+  {"fieldname":"reviewed_on","fieldtype":"Datetime","label":"Reviewed On","read_only":1}
+ ],
+ "links": [], "modified": "2026-09-01 01:00:00.000000", "modified_by": "Administrator", "module": "Frappe Tools", "name": "Document Memory Proposal",
+ "permissions": [{"create":1,"read":1,"write":1,"delete":1,"role":"System Manager"},{"create":1,"read":1,"role":"Scanner User"}],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

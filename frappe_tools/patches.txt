@@ -4,3 +4,6 @@
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+frappe_tools.patches.enable_verified_ocr_evidence
+frappe_tools.patches.make_document_line_matches_dynamic
+frappe_tools.patches.ensure_scanner_layout_others_section

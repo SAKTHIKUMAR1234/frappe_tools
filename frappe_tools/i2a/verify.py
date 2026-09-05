@@ -141,6 +141,21 @@ def cross_check(fields, schema, context=None):
 	context = context or {}
 
 	for f in schema:
+		date_window = f.get("date_window") or {}
+		if date_window:
+			date_from = str(context.get(date_window.get("from")) or "")
+			date_to = str(context.get(date_window.get("to")) or "")
+			for idx, item in _iter_items(fields, f):
+				value = str(item.get("value") or "") if item else ""
+				if not value:
+					continue
+				if (date_from and value < date_from) or (date_to and value > date_to):
+					item["cross_check"] = "miss"
+					deficiencies.append(_deficiency(
+						f, idx, "date_out_of_range",
+						f"date {value!r} is outside operational window {date_from or '-∞'}..{date_to or '+∞'}",
+					))
+
 		spec = f.get("cross_check")
 		if not spec or not spec.get("doctype") or not spec.get("field"):
 			continue

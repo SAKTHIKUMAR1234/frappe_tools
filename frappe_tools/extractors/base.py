@@ -28,6 +28,76 @@ class ExtractionPlugin:
 	def prompt_addendum(self, ctx):
 		return None
 
+	def instructions(self, ctx):
+		"""Code-owned prompt/rule blocks for this adapter."""
+		return []
+
+	def adapter_id(self):
+		return f"{self.system}:{self.target_doctype}"
+
+	def classification_description(self):
+		"""Short visual description used by the automatic intake router."""
+		return f"A document whose intended Frappe operation is {self.target_doctype}."
+
+	def scanner_layouts(self):
+		"""Return adapter-owned scanner layouts to materialize during setup.
+
+		The runtime continues to use submitted ``Document Scanner Layout`` records
+		so Link fields, the legacy scanner, and scan lineage all share one source of
+		truth.  Consumer adapters may declare their defaults here instead of making
+		the reusable core aware of private document types.
+		"""
+		return []
+
+	def reference_arguments(self, extraction):
+		"""Return the reusable dict passed into the code-owned reference adapter."""
+		return {
+			"fields": {row.fieldname: row.value for row in extraction.extracted_fields},
+			"tables": [
+				{
+					"table": row.table or extraction.line_table,
+					"row_no": row.row_no,
+					"values": compact_decision_values(json.loads(row.raw_json or "{}")),
+				}
+				for row in extraction.lines
+			],
+		}
+
+	def reference(self, extraction, arguments):
+		"""Code adapter boundary: turn extracted arguments into local references."""
+		return self.collect_references(extraction)
+
+	def collect_references(self, extraction):
+		from frappe_tools.automation.contracts import ReferenceBundle
+		from frappe_tools.automation.learning import approved_memory, memory_scope_keys
+		facts = {
+			"fields": {row.fieldname: {"value": row.value, "printed": row.llm_value, "confidence": row.confidence} for row in extraction.extracted_fields},
+			"tables": [{"table": row.table or extraction.line_table, "row_no": row.row_no,
+				"values": compact_decision_values(json.loads(row.raw_json or "{}"))} for row in extraction.lines],
+		}
+		memories = approved_memory(self.adapter_id(), memory_scope_keys(extraction))
+		return ReferenceBundle(self.adapter_id(), facts, {}, memories=memories)
+
+	def decision_tools(self, extraction, bundle):
+		return []
+
+	def decision_model_name(self):
+		return frappe.db.get_single_value("Document Extraction Settings", "decision_ai_model") or "Document Verification Sol"
+
+	def decision_instructions(self):
+		return (
+			"Decide only from supplied facts, references and tool evidence. Never invent a Frappe record. "
+			"Return one JSON object: status(review|handoff), confidence(0..1), values, reasons, "
+			"handoff_reasons and memory_sources. Any ambiguity must be handoff."
+		)
+
+	def validate_decision(self, extraction, bundle, decision):
+		return decision
+
+	def apply_decision(self, extraction, decision):
+		"""Apply a validated review decision to staging only; adapters opt in explicitly."""
+		frappe.throw(frappe._("Decision application is not implemented for {0}.").format(self.target_doctype))
+
 	# ----- pipeline hooks ---------------------------------------------------
 	def resolve(self, ctx, extraction):
 		"""Fill matched values + candidates on header fields and line rows (in place)."""
@@ -37,13 +107,37 @@ class ExtractionPlugin:
 		"""Reshape the build dict {table: [child_row_dict, ...]} before insert."""
 		return None
 
+	def writer(self, ctx, extraction, build):
+		"""Code writer boundary; defaults to the existing adapter transform hook."""
+		return self.transform(ctx, extraction, build)
+
+	def target_for_build(self, ctx, extraction):
+		"""Return the target document to populate.
+
+		Adapters may explicitly opt into updating a staging document that they own.
+		The safe default remains creation of a new draft.
+		"""
+		return frappe.new_doc(self.target_doctype)
+
+	def processes_attached_target(self):
+		"""Whether Attach Existing should run extraction before adapter-owned update."""
+		return False
+
 	def customize(self, ctx, doc, extraction):
 		"""Adjust the freshly-built, unsaved target document (app-aware)."""
+		return None
+
+	def after_insert(self, ctx, doc, extraction):
+		"""Run adapter-owned post-insert linking after child rows have permanent names."""
 		return None
 
 	def validate(self, ctx, extraction):
 		"""Return a list of human-readable issues blocking creation, or []."""
 		return []
+
+	def validator(self, ctx, extraction):
+		"""Code validator boundary used immediately before the writer."""
+		return self.validate(ctx, extraction)
 
 	# ----- review actions (generic defaults; plugins override) --------------
 	def confirm_row(self, ctx, extraction, row_no, value):
@@ -92,6 +186,58 @@ class ExtractionPlugin:
 		return {"ok": True, "value": rec.name}
 
 	# ----- UI ---------------------------------------------------------------
+	def rulebook_defaults(self, ctx):
+		"""Optional seed values; existing site rule books remain authoritative."""
+		return []
+
+	def review_phases(self, ctx):
+		"""Ordered handoffs: key, sections, automation, human_input and callbacks.
+
+		Optional automate/validate/complete callbacks receive (ctx, extraction).
+		Completed inputs are checkpointed by the server; edits reopen that phase
+		and its successors without repeating source extraction.
+		"""
+		return []
+
+	def setup(self, ctx):
+		"""Idempotent adapter-owned site setup, called after install/migrate.
+
+		Seed missing configuration here; preserve administrator edits and roles.
+		"""
+		return None
+
+	def review_actions(self, ctx):
+		"""Named UI actions: {name: {handler, permissions: [(doctype, ptype)]}}.
+
+		Handlers receive (ctx, extraction, values). Only installed Python code can
+		register a handler; browsers send the action name, never a method path.
+		"""
+		return {}
+
+	def link_queries(self, ctx, extraction):
+		"""Named Link controls: {key: {doctype, fields, search_fields, filters}}.
+
+		Fields control the record preview. Filters may depend on saved review
+		values. All searches and previews enforce the current user's permissions.
+		"""
+		return {}
+
+	def workflow(self, ctx):
+		"""Public presentation contract. Override in the same file as the adapter.
+
+		Sections reference schema keys; they cannot expose new fields or methods.
+		The server remains responsible for permissions and the final action gate.
+		"""
+		return {
+			"label": self.target_doctype,
+			"description": f"Extract and review a {self.target_doctype} from scanned pages.",
+			"icon": "pi pi-file",
+			"review_sections": [],
+			"action_label": f"Create {self.target_doctype} draft",
+			"action_description": f"Save the reviewed values as a {self.target_doctype} draft.",
+			"result_description": "Open the saved document to continue its normal workflow.",
+		}
+
 	def provenance_map(self, extraction):
 		"""{"fields": {fieldname: {bbox,page}}, "tables": {table: {row_no: {bbox,page}}}}."""
 		return default_provenance_map(extraction)
@@ -131,3 +277,16 @@ def default_provenance_map(extraction):
 			except Exception:
 				pass
 	return {"fields": fields, "tables": tables}
+
+
+def compact_decision_values(values):
+	"""Keep decision payloads bounded: scalar facts plus evidence state, never full coordinates/audit blobs."""
+	values = dict(values or {})
+	evidence = values.pop("_cell_evidence", {}) if isinstance(values.get("_cell_evidence"), dict) else {}
+	for key in ("page", "bbox", "_invoice_candidates", "resolved_sales_invoices"):
+		values.pop(key, None)
+	if evidence:
+		values["evidence"] = {key: {"confidence": item.get("confidence"),
+			"verified": bool(item.get("verified")), "source": item.get("source") or "model"}
+			for key, item in evidence.items() if isinstance(item, dict) and item.get("raw_text")}
+	return values

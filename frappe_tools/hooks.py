@@ -11,15 +11,15 @@ app_license = "mit"
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "frappe_tools",
-# 		"logo": "/assets/frappe_tools/logo.png",
-# 		"title": "Frappe Tools",
-# 		"route": "/frappe_tools",
-# 		"has_permission": "frappe_tools.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "frappe_capture",
+		"logo": "/assets/frappe_tools/ocr_capture_logo.svg",
+		"title": "Frappe Capture",
+		"route": "/ocr",
+		"has_permission": "frappe_tools.api.ocr_agent.has_app_permission",
+	}
+]
 
 # Includes in <head>
 # ------------------
@@ -83,7 +83,10 @@ app_license = "mit"
 # ------------
 
 # before_install = "frappe_tools.install.before_install"
-after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
+after_install = [
+	"frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions",
+	"frappe_tools.automation.setup.setup_document_automation",
+]
 
 # Uninstallation
 # ------------
@@ -255,6 +258,8 @@ doc_events = {
 		"before_insert": "frappe_tools.permissions.ai_bot_guard_write",
 		"before_save": "frappe_tools.permissions.ai_bot_guard_write",
 		"on_trash": "frappe_tools.permissions.ai_bot_guard_write",
+		"after_insert": "frappe_tools.scan_lineage.target_after_insert",
+		"on_cancel": "frappe_tools.scan_lineage.target_on_cancel",
 	}
 }
 
@@ -283,4 +288,9 @@ scheduler_events = {
 # re-enabled. NOTE: on a live site, run `bench restart` after migrate — perms
 # are cached per gunicorn worker, so the DB change isn't visible until workers
 # recycle.
-after_migrate = ["frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"]
+doc_extraction_plugins = []
+
+after_migrate = [
+	"frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions",
+	"frappe_tools.automation.setup.setup_document_automation",
+]

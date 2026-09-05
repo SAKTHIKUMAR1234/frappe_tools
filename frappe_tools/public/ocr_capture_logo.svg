@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Frappe Capture">
+  <defs>
+    <linearGradient id="capture-gradient" x1="8" y1="4" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#065f46"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="17" fill="url(#capture-gradient)"/>
+  <path d="M18 26v-6a4 4 0 0 1 4-4h6M46 26v-6a4 4 0 0 0-4-4h-6M18 38v6a4 4 0 0 0 4 4h6M46 38v6a4 4 0 0 1-4 4h-6" fill="none" stroke="#d1fae5" stroke-width="3" stroke-linecap="round"/>
+  <path d="m32 23 1.8 5.2L39 30l-5.2 1.8L32 37l-1.8-5.2L25 30l5.2-1.8L32 23Z" fill="#fff"/>
+</svg>

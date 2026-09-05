@@ -12,6 +12,7 @@ to the fakes at import), then app-path inserts, then imports.
 import json
 import os
 import sys
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -20,11 +21,12 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
-sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/essdee")
+APPS_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(APPS_DIR / "frappe_tools"))
+sys.path.insert(0, str(APPS_DIR / "essdee"))
 
 from frappe_tools.i2a import engine, match, providers, tools, verify  # noqa: E402
-from essdee.essdee.utils import ocr  # noqa: E402
+from essdee.essdee.utils import lr_matching, ocr  # noqa: E402
 
 PASS, FAIL = [], []
 
@@ -497,6 +499,48 @@ check("UC10 conflict found on the unioned fetch", _refs10 and _refs10["conflict"
 check("UC10 both fetched-apart records are in the reason",
 	"INV2627-00311" in _refs10["reason"] and "SOI2627-00327" in _refs10["reason"], _refs10["reason"])
 FRAPPE.get_all = _orig
+
+# ================================================================== writeback gate
+
+print("\n== reviewer-valid rows are the only legacy writeback source ==")
+_entry = fake_frappe.FakeRow({
+	"extracted_lr_number": "STALE-LR", "extracted_lr_date": "2026-01-01",
+	"extracted_transport": "STALE", "extracted_consignee": "STALE",
+	"extracted_destination": "STALE", "extracted_bill_numbers": '["STALE"]',
+	"extracted_freight_amount": 999,
+})
+ocr._mirror_legacy_fields(_entry, [
+	{"field_key": "lr_number", "array_index": 0, "value": "WRONG-LR", "status": "Rejected"},
+	{"field_key": "lr_date", "array_index": 0, "value": "2026-08-01", "status": "Pending"},
+	{"field_key": "bill_number", "array_index": 0, "value": "BAD-1", "status": "Rejected"},
+	{"field_key": "bill_number", "array_index": 1, "value": "GOOD-2", "status": "Edited"},
+	{"field_key": "freight_amount", "array_index": 0, "value": 0, "status": "Approved"},
+])
+check("rejected LR clears stale legacy mirror", _entry.extracted_lr_number is None, str(_entry.extracted_lr_number))
+check("pending date clears stale legacy mirror", _entry.extracted_lr_date is None, str(_entry.extracted_lr_date))
+check("only reviewer-valid bill reaches matching mirror",
+	json.loads(_entry.extracted_bill_numbers) == ["GOOD-2"], str(_entry.extracted_bill_numbers))
+check("approved explicit zero freight is preserved", _entry.extracted_freight_amount == 0.0,
+	str(_entry.extracted_freight_amount))
+ocr._mirror_legacy_fields(_entry, [
+	{"field_key": "freight_amount", "array_index": 0, "value": 740, "status": "Rejected"},
+])
+check("rejected freight clears prior legacy value", _entry.extracted_freight_amount is None,
+	str(_entry.extracted_freight_amount))
+
+_match_entry = fake_frappe.FakeRow({
+	"name": "ENTRY-1",
+	"extraction_fields": [
+		fake_frappe.FakeRow({"field_key": "bill_number", "value": "PENDING-1", "status": "Pending"}),
+		fake_frappe.FakeRow({"field_key": "eway_bill", "value": "123456789012", "status": "Rejected"}),
+		fake_frappe.FakeRow({"field_key": "bill_number", "value": "APPROVED-2", "status": "Approved"}),
+	],
+	"extracted_bill_numbers": '["STALE-9"]',
+})
+_bills, _ewbs = lr_matching.collect_match_keys(_match_entry)
+check("matching consumes only Approved/Edited child evidence", _bills == {"APPROVED-2"} and _ewbs == set(),
+	str((_bills, _ewbs)))
+check("current invalid child rows never resurrect stale legacy keys", "STALE-9" not in _bills, str(_bills))
 
 # ------------------------------------------------------------------ summary
 print(f"\n{'='*60}\nPASS: {len(PASS)}   FAIL: {len(FAIL)}")

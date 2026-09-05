@@ -17,10 +17,12 @@ always available. No per-app knowledge lives here.
 
 import base64
 import io
+import os
 import re
 import shutil
 import subprocess
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 from frappe_tools.i2a import extract
 
@@ -28,7 +30,7 @@ LOAD_MAX_DIM = 3000     # px — working-image ceiling (a 6600x9350 scan decodes
                         # capped here it stays ~27MB while OCR/marks/crops keep ample detail)
 OCR_MAX_DIM = 2200      # px — OCR input downscale ceiling (speed; coords are relative)
 OCR_TIMEOUT_S = 45
-OCR_MIN_CONF = 30       # tesseract word confidence floor
+OCR_MIN_CONF = 0        # target matching filters noise; retain faint printed words for grounding
 OCR_PSM = 11            # sparse text — LRs/forms are scattered boxes, not paragraphs
 
 MAX_WINDOW = 6          # max adjacent words joined when matching a value
@@ -48,7 +50,7 @@ CROP_MAX_DIM = 1200     # crops downscaled past this — a near-full-page claime
 
 def load_image(file_ref):
 	"""File reference (bytes / data: URL / Frappe file_url incl. S3) → RGB PIL image."""
-	from PIL import Image
+	from PIL import Image, ImageOps
 
 	if isinstance(file_ref, bytes):
 		data = file_ref
@@ -56,7 +58,7 @@ def load_image(file_ref):
 		data = base64.b64decode(file_ref.split(",", 1)[1])
 	else:
 		data, _mime = extract._read_file(file_ref)
-	img = Image.open(io.BytesIO(data)).convert("RGB")
+	img = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
 	if max(img.size) > LOAD_MAX_DIM:  # bound resident memory for the whole run
 		s = LOAD_MAX_DIM / max(img.size)
 		img = img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))))
@@ -89,7 +91,7 @@ def ocr_word_boxes(pil_image):
 	img.save(buf, format="PNG")
 	try:
 		proc = subprocess.run(
-			["tesseract", "stdin", "stdout", "--psm", str(OCR_PSM), "tsv"],
+			["tesseract", "stdin", "stdout", "-l", _ocr_languages(), "--psm", str(OCR_PSM), "tsv"],
 			input=buf.getvalue(), capture_output=True, timeout=OCR_TIMEOUT_S,
 		)
 	except Exception:
@@ -123,6 +125,21 @@ def ocr_word_boxes(pil_image):
 			"line": (cols[2], cols[3], cols[4]),  # block/par/line — reading order group
 		})
 	return words
+
+
+@lru_cache(maxsize=1)
+def _ocr_languages():
+	"""Use configured installed languages; English+Tamil is the safe default."""
+	requested = os.getenv("FRAPPE_TOOLS_OCR_LANGS", "eng+tam").split("+")
+	try:
+		proc = subprocess.run(
+			["tesseract", "--list-langs"], capture_output=True, text=True, timeout=5,
+		)
+		available = set(proc.stdout.splitlines()[1:]) if proc.returncode == 0 else {"eng"}
+	except Exception:
+		available = {"eng"}
+	selected = [language for language in requested if language in available]
+	return "+".join(selected or (["eng"] if "eng" in available else sorted(available)[:1]))
 
 
 # ------------------------------------------------------------------ matching

@@ -7,22 +7,61 @@
  "engine": "InnoDB",
  "field_order": [
   "target_doctype",
+  "operation_mode",
+  "existing_document",
   "status",
+  "auto_process",
+  "auto_decide",
+  "classification_section",
+  "classification_phase",
+  "classification_confidence",
+  "classification_model",
+  "column_break_classification",
+  "classification_job_id",
+  "classification_override_by",
+  "classification_override_on",
+  "classification_json",
+  "layout_section",
+  "selected_layout",
+  "layout_phase",
+  "layout_confidence",
+  "column_break_layout",
+  "layout_model",
+  "layout_json",
   "created_document",
   "model_used",
   "line_table",
   "column_break_meta",
   "scanned_document",
+  "source_count",
+  "page_count",
   "total_tokens",
   "cost_usd",
+  "processing_job_id",
+  "processing_started_on",
+  "processing_completed_on",
   "source_section",
+  "source_files",
+  "rendered_pages_section",
   "pages",
   "fields_section",
   "extracted_fields",
   "lines_section",
   "lines",
+  "decision_section",
+  "adapter_id",
+  "decision_phase",
+  "decision_job_id",
+  "handoff_reason",
+  "reference_bundle_json",
+  "decision_json",
+  "tool_trace_json",
+  "review_delta_json",
+  "history_section",
+  "processing_events",
   "error_section",
-  "error_log"
+  "error_log",
+  "workflow_state_json"
  ],
  "fields": [
   {
@@ -31,8 +70,23 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Target DocType",
-   "options": "DocType",
-   "reqd": 1
+   "options": "DocType"
+  },
+  {
+   "default": "Create New",
+   "fieldname": "operation_mode",
+   "fieldtype": "Select",
+   "label": "Operation Mode",
+   "options": "Create New\nAttach Existing",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.operation_mode=='Attach Existing'",
+   "fieldname": "existing_document",
+   "fieldtype": "Dynamic Link",
+   "label": "Existing Document",
+   "options": "target_doctype",
+   "read_only": 1
   },
   {
    "default": "Draft",
@@ -41,7 +95,117 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Draft\nExtracting\nReview\nCreated\nFailed",
+   "options": "Draft\nPreparing\nClassifying\nClassification Handoff\nQueued\nExtracting\nLayout Handoff\nReview\nCreated\nAttached\nFailed",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "When source files are attached to a Draft run, stage and enqueue them automatically.",
+   "fieldname": "auto_process",
+   "fieldtype": "Check",
+   "label": "Process Automatically"
+  },
+  {
+   "default": "1",
+   "description": "After vision extraction, queue the configured code-owned decision agent automatically.",
+   "fieldname": "auto_decide",
+   "fieldtype": "Check",
+   "label": "Run Decision Agent Automatically"
+  },
+  {
+   "fieldname": "classification_section",
+   "fieldtype": "Section Break",
+   "label": "Automatic Classification"
+  },
+  {
+   "fieldname": "classification_phase",
+   "fieldtype": "Select",
+   "label": "Classification Phase",
+   "options": "\nQueued\nRunning\nClassified\nHuman Handoff\nHuman Confirmed\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "classification_confidence",
+   "fieldtype": "Percent",
+   "label": "Classification Confidence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "classification_model",
+   "fieldtype": "Data",
+   "label": "Classification Model",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_classification",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "classification_job_id",
+   "fieldtype": "Data",
+   "label": "Classification Job ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "classification_override_by",
+   "fieldtype": "Link",
+   "label": "Classification Confirmed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "classification_override_on",
+   "fieldtype": "Datetime",
+   "label": "Classification Confirmed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "classification_json",
+   "fieldtype": "Code",
+   "label": "Classification Decision",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "layout_section",
+   "fieldtype": "Section Break",
+   "label": "Document Layout and Page Order"
+  },
+  {
+   "fieldname": "selected_layout",
+   "fieldtype": "Link",
+   "label": "Selected Document Layout",
+   "options": "Document Scanner Layout",
+   "read_only": 1
+  },
+  {
+   "fieldname": "layout_phase",
+   "fieldtype": "Select",
+   "label": "Layout Phase",
+   "options": "\nNot Required\nRouting\nOrdered\nHuman Handoff\nHuman Confirmed\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "layout_confidence",
+   "fieldtype": "Percent",
+   "label": "Layout Confidence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_layout",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "layout_model",
+   "fieldtype": "Data",
+   "label": "Layout Model",
+   "read_only": 1
+  },
+  {
+   "fieldname": "layout_json",
+   "fieldtype": "Code",
+   "label": "Layout and Page Order Decision",
+   "options": "JSON",
    "read_only": 1
   },
   {
@@ -76,6 +240,18 @@
    "read_only": 1
   },
   {
+   "fieldname": "source_count",
+   "fieldtype": "Int",
+   "label": "Source Files",
+   "read_only": 1
+  },
+  {
+   "fieldname": "page_count",
+   "fieldtype": "Int",
+   "label": "Rendered Pages",
+   "read_only": 1
+  },
+  {
    "fieldname": "total_tokens",
    "fieldtype": "Int",
    "label": "Total Tokens",
@@ -89,9 +265,38 @@
    "read_only": 1
   },
   {
+   "fieldname": "processing_job_id",
+   "fieldtype": "Data",
+   "label": "Processing Job ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processing_started_on",
+   "fieldtype": "Datetime",
+   "label": "Processing Started On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processing_completed_on",
+   "fieldtype": "Datetime",
+   "label": "Processing Completed On",
+   "read_only": 1
+  },
+  {
    "fieldname": "source_section",
    "fieldtype": "Section Break",
-   "label": "Scanned Pages"
+   "label": "Source Documents"
+  },
+  {
+   "fieldname": "source_files",
+   "fieldtype": "Table",
+   "label": "Images and PDFs",
+   "options": "Document Extraction Source"
+  },
+  {
+   "fieldname": "rendered_pages_section",
+   "fieldtype": "Section Break",
+   "label": "Rendered Pages"
   },
   {
    "fieldname": "pages",
@@ -122,6 +327,77 @@
    "options": "Document Extraction Line"
   },
   {
+   "fieldname": "decision_section",
+   "fieldtype": "Section Break",
+   "label": "Decision Audit"
+  },
+  {
+   "fieldname": "adapter_id",
+   "fieldtype": "Data",
+   "label": "Code Adapter",
+   "read_only": 1
+  },
+  {
+   "fieldname": "decision_phase",
+   "fieldtype": "Select",
+   "label": "Decision Phase",
+   "options": "\nQueued\nRunning\nReferences Ready\nReview Ready\nHuman Handoff\nApplied to Review\nStale\nDraft Created",
+   "read_only": 1
+  },
+  {
+   "fieldname": "decision_job_id",
+   "fieldtype": "Data",
+   "label": "Decision Job ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "handoff_reason",
+   "fieldtype": "Small Text",
+   "label": "Human Handoff Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_bundle_json",
+   "fieldtype": "Code",
+   "label": "Reference Bundle",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "decision_json",
+   "fieldtype": "Code",
+   "label": "Agent Decision",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tool_trace_json",
+   "fieldtype": "Code",
+   "label": "Tool Trace",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "review_delta_json",
+   "fieldtype": "Code",
+   "label": "Human Review Deltas",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "history_section",
+   "fieldtype": "Section Break",
+   "label": "Processing History"
+  },
+  {
+   "fieldname": "processing_events",
+   "fieldtype": "Table",
+   "label": "Processing Events",
+   "options": "Document Extraction Event",
+   "read_only": 1
+  },
+  {
    "collapsible": 1,
    "fieldname": "error_section",
    "fieldtype": "Section Break",
@@ -133,11 +409,20 @@
    "label": "Error Log",
    "options": "Text",
    "read_only": 1
+  },
+  {
+   "fieldname": "workflow_state_json",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "label": "Review Phase Checkpoints",
+   "read_only": 1,
+   "hidden": 1,
+   "no_copy": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-25 10:00:00.000000",
+ "modified": "2026-09-03 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Extraction",

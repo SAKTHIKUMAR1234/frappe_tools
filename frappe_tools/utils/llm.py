@@ -1,23 +1,13 @@
-"""Low-level OpenRouter vision client for document extraction.
-
-Keeps all HTTP/transport concerns (request building, timeout, retries, cost &
-token accounting, call logging) separate from the domain logic in
-`frappe_tools.api.doc_extract`. Provider is OpenRouter today; the function
-surface is provider-agnostic so a future Tally/Odoo path can reuse it.
-"""
+"""Configured vision transport, independent of the document decision agent."""
 
 import json
 import re
-import time
 
 import frappe
-import requests
 from frappe import _
-from frappe.utils import cint, flt
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 SETTINGS_DOCTYPE = "Document Extraction Settings"
-CALL_LOG_DOCTYPE = "Document AI Call Log"
+DEFAULT_VISION_MODEL = "Document Automation Luna"
 
 
 def get_settings():
@@ -25,173 +15,83 @@ def get_settings():
 
 
 def ensure_ready():
-	"""Return settings after validating the feature is usable, else throw."""
+	"""Resolve the explicitly selected vision model without switching providers."""
 	settings = get_settings()
-	if not settings.enable:
+	if not _setting(settings, "enable"):
 		frappe.throw(_("Document Extraction is disabled. Enable it in Document Extraction Settings."))
-	if not settings.get_api_key():
-		frappe.throw(_("OpenRouter API Key is not set in Document Extraction Settings."))
-	return settings
+	model_name = _setting(settings, "vision_ai_model") or DEFAULT_VISION_MODEL
+	if not frappe.db.exists("AI Model", model_name):
+		frappe.throw(_("Vision AI Model {0} does not exist").format(model_name))
+	model = frappe.get_doc("AI Model", model_name)
+	if not model.enabled:
+		frappe.throw(_("Vision AI Model {0} is disabled").format(model_name))
+	if model.provider not in {"OpenRouter", "Codex OAuth"}:
+		frappe.throw(_("Select an OpenRouter or Codex OAuth vision model."))
+	if model.provider == "OpenRouter" and not model.get_password("api_key", raise_exception=False):
+		frappe.throw(_("Configure the API key on vision model {0}.").format(model_name))
+	if not model.supports_vision:
+		frappe.throw(_("Vision is not enabled on AI Model {0}").format(model_name))
+	if model.fallback_model:
+		frappe.throw(_("Remove the fallback model from {0}; document extraction must fail closed.").format(model_name))
+	return settings, model
+
+
+def readiness():
+	"""Return configuration readiness without contacting an external API."""
+	try:
+		_settings, model = ensure_ready()
+		from frappe_tools.automation import agent_providers
+
+		status = agent_providers.health(model) if model.provider == "Codex OAuth" else {"ready": True}
+		return {
+			"ready": bool(status.get("ready")),
+			"provider": model.provider,
+			"model": model.model_id or model.name,
+			"reason": status.get("reason"),
+		}
+	except Exception as exc:
+		return {"ready": False, "provider": None, "model": None, "reason": str(exc).split("\n", 1)[0]}
 
 
 def call_vision(image_data_urls, system_prompt, user_prompt, *, extraction=None, target_doctype=None):
-	"""Call the configured vision model with N images + a JSON-mode prompt.
+	"""Extract through the selected provider; the decision model is not consulted."""
+	_settings, model = ensure_ready()
+	if model.provider == "OpenRouter":
+		from frappe_tools.i2a import providers
 
-	Retries transient failures up to `max_attempts` (from settings). Every
-	attempt writes a Document AI Call Log row. Returns a dict on success:
-	{"data": <parsed json>, "usage": {...}, "model": str, "latency_ms": int}.
-	Throws if all attempts fail.
-	"""
-	settings = ensure_ready()
-	api_key = settings.get_api_key()
-	model = settings.model or "google/gemini-2.5-flash"
-	max_attempts = max(cint(settings.max_attempts) or 1, 1)
-
-	content = [{"type": "text", "text": user_prompt}]
-	for url in image_data_urls:
-		content.append({"type": "image_url", "image_url": {"url": url}})
-
-	body = {
-		"model": model,
-		"messages": [
+		urls = list(image_data_urls or [])
+		if not urls or len(urls) > 24:
+			frappe.throw(_("Document vision requires between 1 and 24 page images."))
+		if any(not isinstance(url, str) or not url.startswith("data:image/") for url in urls):
+			frappe.throw(_("Document vision accepts uploaded image data only."))
+		messages = [
 			{"role": "system", "content": system_prompt},
-			{"role": "user", "content": content},
-		],
-		"temperature": flt(settings.temperature) or 0,
-		"max_tokens": cint(settings.max_tokens) or 8192,
-		"response_format": {"type": "json_object"},
-		"usage": {"include": True},
-	}
-	headers = {
-		"Authorization": f"Bearer {api_key}",
-		"Content-Type": "application/json",
-		"HTTP-Referer": frappe.utils.get_url(),
-		"X-Title": "Frappe Tools Document Extraction",
-	}
-	timeout = cint(settings.request_timeout) or 120
+			{"role": "user", "content": [
+				{"type": "text", "text": user_prompt},
+				*[{"type": "image_url", "image_url": {"url": url}} for url in urls],
+			]},
+		]
+		result = providers.call_model(model, messages, purpose="document_vision", run=extraction, action=target_doctype)
+		if not isinstance(result.get("data"), dict):
+			raise providers.ProviderError(_("Vision returned invalid document JSON; review or retry this scan."))
+		return {**result, "model": model.model_id or model.name}
+	from frappe_tools.automation import agent_providers
 
-	last_error = None
-	for attempt in range(1, max_attempts + 1):
-		outcome = _attempt_call(body, headers, timeout, model, extraction, target_doctype)
-		if outcome.get("ok"):
-			return {
-				"data": outcome["data"],
-				"usage": outcome["usage"],
-				"model": model,
-				"latency_ms": outcome["latency_ms"],
-			}
-		last_error = outcome.get("error")
-		if attempt < max_attempts:
-			time.sleep(min(2 * attempt, 8))
-
-	frappe.throw(_("LLM extraction failed after {0} attempt(s): {1}").format(max_attempts, last_error or _("unknown error")))
+	return agent_providers.call_vision(
+		model,
+		image_data_urls,
+		system_prompt,
+		user_prompt,
+		run=extraction,
+		action=target_doctype,
+	)
 
 
-def _attempt_call(body, headers, timeout, model, extraction, target_doctype):
-	started = time.monotonic()
-	status = "Success"
-	http_status = None
-	error = None
-	result = {}
-	usage = {}
-	parsed = None
-	raw_text = ""
-	finish_reason = None
-
-	try:
-		resp = requests.post(OPENROUTER_URL, headers=headers, json=body, timeout=timeout)
-		http_status = resp.status_code
-		try:
-			result = resp.json()
-		except ValueError:
-			result = {"non_json_response": (resp.text or "")[:4000]}
-		resp.raise_for_status()
-
-		if isinstance(result, dict) and result.get("error"):
-			raise RuntimeError(str(result["error"]))
-
-		usage = (result.get("usage") or {}) if isinstance(result, dict) else {}
-		choices = result.get("choices") or []
-		first_choice = choices[0] if choices else {}
-		raw_text = (first_choice.get("message", {}).get("content") or "")
-		finish_reason = first_choice.get("finish_reason")
-		parsed = safe_json_loads(raw_text)
-		if parsed is None:
-			# Surface WHY it failed: truncation (hit max_tokens) is the usual
-			# culprit and is deterministic across retries. Include a snippet of
-			# the raw text so the error alone is diagnostic.
-			if finish_reason == "length":
-				hint = _(" — response was truncated (finish_reason=length); raise 'Max Tokens' in Document Extraction Settings")
-			else:
-				hint = ""
-			snippet = raw_text[:200] if raw_text else "<empty response>"
-			raise ValueError(
-				_("could not parse JSON from model response{0}. Raw begins: {1}").format(hint, snippet)
-			)
-	except requests.Timeout as exc:
-		status, error = "Timeout", str(exc)
-	except requests.HTTPError as exc:
-		status = "Error"
-		error = _extract_api_error(result) or str(exc)
-	except Exception as exc:
-		status = "Error"
-		error = _extract_api_error(result) or str(exc)
-
-	latency_ms = int((time.monotonic() - started) * 1000)
-	_log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text, finish_reason)
-
-	if status == "Success" and parsed is not None:
-		return {"ok": True, "data": parsed, "usage": usage, "latency_ms": latency_ms}
-	return {"ok": False, "error": error}
-
-
-def _extract_api_error(result):
-	if isinstance(result, dict):
-		err = result.get("error")
-		if isinstance(err, dict):
-			return err.get("message") or json.dumps(err)[:500]
-		if err:
-			return str(err)[:500]
-	return None
-
-
-def _log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text=None, finish_reason=None):
-	"""Persist a Document AI Call Log row. Never raises into the caller."""
-	try:
-		log = frappe.new_doc(CALL_LOG_DOCTYPE)
-		log.extraction = extraction
-		log.target_doctype = target_doctype
-		log.model = model
-		log.provider = "OpenRouter"
-		log.status = status
-		log.http_status = http_status
-		log.latency_ms = latency_ms
-		log.prompt_tokens = cint((usage or {}).get("prompt_tokens"))
-		log.completion_tokens = cint((usage or {}).get("completion_tokens"))
-		log.total_tokens = cint((usage or {}).get("total_tokens"))
-		log.cost_usd = flt((usage or {}).get("cost"))
-		log.request_payload = frappe.as_json(_redact_images(body))
-		log.response_payload = frappe.as_json(result)[:140000]
-		log.raw_response = (raw_text or "")[:140000]
-		log.finish_reason = finish_reason
-		log.error_message = (error or "")[:500]
-		log.flags.ignore_permissions = True
-		log.insert(ignore_permissions=True)
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Document AI Call Log insert failed")
-
-
-def _redact_images(body):
-	"""Deep-copy the request body with image data URLs replaced by a stub."""
-	clone = json.loads(json.dumps(body))
-	for message in clone.get("messages", []):
-		content = message.get("content")
-		if isinstance(content, list):
-			for part in content:
-				if isinstance(part, dict) and part.get("type") == "image_url":
-					url = (part.get("image_url") or {}).get("url", "")
-					part["image_url"] = {"url": f"<image redacted: {len(url)} chars>"}
-	return clone
+def _setting(settings, name, default=None):
+	getter = getattr(settings, "get", None)
+	if callable(getter):
+		return getter(name, default)
+	return getattr(settings, name, default)
 
 
 def safe_json_loads(text):

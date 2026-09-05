@@ -1,0 +1,29 @@
+{
+ "actions": [], "autoname": "DITEM-.#####", "doctype": "DocType", "engine": "InnoDB",
+ "field_order": ["status", "extraction", "row_no", "created_item", "source_section", "printed_description", "supplier_code", "printed_hsn", "printed_uom", "proposal_section", "company", "item_code", "item_name", "item_group", "stock_uom", "account_section", "expense_account", "income_account", "item_tax_template", "decision_json"],
+ "fields": [
+  {"default":"Draft","fieldname":"status","fieldtype":"Select","in_list_view":1,"label":"Status","options":"Draft\nApproved\nCreated\nRejected","read_only":1},
+  {"fieldname":"extraction","fieldtype":"Link","in_list_view":1,"label":"Document Extraction","options":"Document Extraction","reqd":1,"read_only":1},
+  {"fieldname":"row_no","fieldtype":"Int","label":"Row No","reqd":1,"read_only":1},
+  {"fieldname":"created_item","fieldtype":"Link","in_list_view":1,"label":"Created Item","options":"Item","read_only":1},
+  {"fieldname":"source_section","fieldtype":"Section Break","label":"Printed Evidence"},
+  {"fieldname":"printed_description","fieldtype":"Small Text","label":"Printed Description","read_only":1},
+  {"fieldname":"supplier_code","fieldtype":"Data","label":"Supplier Item Code","read_only":1},
+  {"fieldname":"printed_hsn","fieldtype":"Data","label":"Printed HSN/SAC","read_only":1},
+  {"fieldname":"printed_uom","fieldtype":"Data","label":"Printed UOM","read_only":1},
+  {"fieldname":"proposal_section","fieldtype":"Section Break","label":"Human-approved Master Data"},
+  {"fieldname":"company","fieldtype":"Link","label":"Company","options":"Company","reqd":1},
+  {"fieldname":"item_code","fieldtype":"Data","label":"Item Code","reqd":1},
+  {"fieldname":"item_name","fieldtype":"Data","label":"Item Name","reqd":1},
+  {"fieldname":"item_group","fieldtype":"Link","label":"Item Group","options":"Item Group","reqd":1},
+  {"fieldname":"stock_uom","fieldtype":"Link","label":"Stock UOM","options":"UOM","reqd":1},
+  {"fieldname":"account_section","fieldtype":"Section Break","label":"Company Policy"},
+  {"fieldname":"expense_account","fieldtype":"Link","label":"Expense Account","options":"Account"},
+  {"fieldname":"income_account","fieldtype":"Link","label":"Income Account","options":"Account"},
+  {"fieldname":"item_tax_template","fieldtype":"Link","label":"Item Tax Template","options":"Item Tax Template"},
+  {"fieldname":"decision_json","fieldtype":"Code","label":"Proposal Evidence and Reasons","options":"JSON","read_only":1}
+ ],
+ "links": [], "modified": "2026-09-01 01:00:00.000000", "modified_by": "Administrator", "module": "Frappe Tools", "name": "Document Item Proposal",
+ "permissions": [{"create":1,"read":1,"write":1,"delete":1,"role":"System Manager"},{"create":1,"read":1,"write":1,"role":"Scanner User"}],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

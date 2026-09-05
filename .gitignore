@@ -5,3 +5,6 @@
 tags
 node_modules
 __pycache__
+# Built per bench so optional adapter UI stays owned by its app.
+frappe_tools/public/ocr_ui/
+ocr_ui/package-lock.json

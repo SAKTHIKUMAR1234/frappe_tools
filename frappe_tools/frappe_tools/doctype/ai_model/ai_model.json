@@ -15,6 +15,13 @@
   "api_key",
   "api_secret",
   "base_url",
+  "fallback_model",
+  "agent_section",
+  "agent_executable",
+  "agent_timeout_seconds",
+  "column_break_agent",
+  "agent_max_concurrency",
+  "agent_queue_timeout_seconds",
   "capabilities_section",
   "supports_vision",
   "supports_json_mode",
@@ -48,11 +55,11 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Provider",
-   "options": "OpenRouter\nAnthropic\nOpenAI\nCustom",
+   "options": "OpenRouter\nAnthropic\nOpenAI\nCodex OAuth\nClaude OAuth\nCustom",
    "reqd": 1
   },
   {
-   "description": "Provider's model identifier, e.g. google/gemini-2.5-flash",
+   "description": "Provider's model identifier, e.g. google/gemini-3.7-flash",
    "fieldname": "model_id",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -69,7 +76,7 @@
    "fieldname": "auth_type",
    "fieldtype": "Select",
    "label": "Auth Type",
-   "options": "API Key\nAPI Key + Secret\nToken"
+   "options": "API Key\nAPI Key + Secret\nToken\nManaged OAuth"
   },
   {
    "fieldname": "api_key",
@@ -87,6 +94,52 @@
    "fieldname": "base_url",
    "fieldtype": "Data",
    "label": "Base URL"
+  },
+  {
+   "description": "Optional model used when this provider is unavailable, unauthenticated, rate-limited, or out of subscription allowance.",
+   "fieldname": "fallback_model",
+   "fieldtype": "Link",
+   "label": "Fallback Model",
+   "options": "AI Model"
+  },
+  {
+   "depends_on": "eval:['Codex OAuth','Claude OAuth'].includes(doc.provider)",
+   "fieldname": "agent_section",
+   "fieldtype": "Section Break",
+   "label": "Subscription Agent Runtime"
+  },
+  {
+   "depends_on": "eval:['Codex OAuth','Claude OAuth'].includes(doc.provider)",
+   "description": "Optional absolute path to the provider agent executable. Leave empty to use the provider adapter default.",
+   "fieldname": "agent_executable",
+   "fieldtype": "Data",
+   "label": "Agent Executable"
+  },
+  {
+   "default": "300",
+   "depends_on": "eval:['Codex OAuth','Claude OAuth'].includes(doc.provider)",
+   "fieldname": "agent_timeout_seconds",
+   "fieldtype": "Int",
+   "label": "Agent Timeout (seconds)"
+  },
+  {
+   "fieldname": "column_break_agent",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "2",
+   "depends_on": "eval:['Codex OAuth','Claude OAuth'].includes(doc.provider)",
+   "description": "Maximum concurrent local agent processes for this model on one server.",
+   "fieldname": "agent_max_concurrency",
+   "fieldtype": "Int",
+   "label": "Maximum Concurrency"
+  },
+  {
+   "default": "30",
+   "depends_on": "eval:['Codex OAuth','Claude OAuth'].includes(doc.provider)",
+   "fieldname": "agent_queue_timeout_seconds",
+   "fieldtype": "Int",
+   "label": "Queue Wait (seconds)"
   },
   {
    "fieldname": "capabilities_section",

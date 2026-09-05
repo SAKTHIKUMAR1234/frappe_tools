@@ -130,7 +130,9 @@ const props = defineProps({
 })
 
 const imageReceiveTimers = new Map();
-const RECEIVE_TIMEOUT_MS = 15000;
+// Large, full-resolution phone captures may need many data-channel chunks on
+// a slow LAN. Keep the receiver alive while the transfer is making progress.
+const RECEIVE_TIMEOUT_MS = 120000;
 
 const localDoctype = ref(props.doctype);
 const localDocname = ref(props.document_name);
@@ -314,6 +316,8 @@ function handleDataMessage(e) {
         if (!imageData.chunks[index]) {
             imageData.chunks[index] = data;
             imageData.received++;
+            clearReceiveTimeout(id);
+            startReceiveTimeout(id);
         }
 
         // COMPLETED
@@ -346,6 +350,9 @@ function handleDataMessage(e) {
 
             notifySuccess();
             playBeep();
+            if (dataChannel?.readyState === 'open') {
+                dataChannel.send(JSON.stringify({ type: 'ack', id }));
+            }
         }
 
     } catch (err) {

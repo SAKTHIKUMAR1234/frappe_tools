@@ -5,14 +5,13 @@
  "engine": "InnoDB",
  "field_order": [
   "enable",
-  "provider",
-  "model",
-  "openrouter_api_key",
+  "vision_ai_model",
+  "decision_ai_model",
   "advanced_section",
-  "max_tokens",
-  "request_timeout",
-  "temperature",
-  "max_attempts",
+  "background_section",
+  "background_queue",
+  "timeout_per_page_minutes",
+  "require_verified_evidence",
   "embedding_section",
   "enable_embeddings",
   "embedding_provider",
@@ -28,25 +27,21 @@
    "label": "Enable Document Extraction"
   },
   {
-   "default": "OpenRouter",
-   "fieldname": "provider",
-   "fieldtype": "Select",
-   "label": "Provider",
-   "options": "OpenRouter",
+   "default": "Document Automation Luna",
+   "description": "Reads the scanned pages, values and source boxes. Luna is the default extractor; this model is independent of the verifier.",
+   "fieldname": "vision_ai_model",
+   "fieldtype": "Link",
+   "label": "Extractor AI Model",
+   "options": "AI Model",
    "reqd": 1
   },
   {
-   "default": "google/gemini-2.5-flash",
-   "description": "OpenRouter model id. Use a Gemini vision model for best bounding-box accuracy (e.g. google/gemini-2.5-flash, google/gemini-2.5-pro).",
-   "fieldname": "model",
-   "fieldtype": "Data",
-   "label": "Model",
-   "reqd": 1
-  },
-  {
-   "fieldname": "openrouter_api_key",
-   "fieldtype": "Password",
-   "label": "OpenRouter API Key"
+   "default": "Document Verification Sol",
+   "description": "Sol verifies extracted values against adapter references using read-only tools. Ambiguity requires human review; only the adapter writes the confirmed result.",
+   "fieldname": "decision_ai_model",
+   "fieldtype": "Link",
+   "label": "Verifier AI Model",
+   "options": "AI Model"
   },
   {
    "fieldname": "advanced_section",
@@ -54,31 +49,34 @@
    "label": "Advanced"
   },
   {
-   "default": "8192",
-   "fieldname": "max_tokens",
-   "fieldtype": "Int",
-   "label": "Max Output Tokens"
+   "fieldname": "background_section",
+   "fieldtype": "Section Break",
+   "label": "Background Processing"
   },
   {
-   "default": "120",
-   "fieldname": "request_timeout",
-   "fieldtype": "Int",
-   "label": "Request Timeout (seconds)"
-  },
-  {
-   "default": "0",
-   "description": "0 gives the most deterministic extraction.",
-   "fieldname": "temperature",
-   "fieldtype": "Float",
-   "label": "Temperature",
-   "precision": "2"
+   "default": "long",
+   "description": "Frappe worker queue used for each individual document extraction.",
+   "fieldname": "background_queue",
+   "fieldtype": "Select",
+   "label": "Background Queue",
+   "options": "long\ndefault\nshort",
+   "reqd": 1
   },
   {
    "default": "3",
-   "description": "How many times to retry the LLM call before giving up.",
-   "fieldname": "max_attempts",
+   "description": "Worker timeout is this value multiplied by the number of uploaded pages. Example: 4 pages × 3 minutes = 12 minutes.",
+   "fieldname": "timeout_per_page_minutes",
    "fieldtype": "Int",
-   "label": "Max Attempts"
+   "label": "Timeout per Page (minutes)",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "Block draft creation until every extracted value has OCR-verified or reviewer-marked source evidence.",
+   "fieldname": "require_verified_evidence",
+   "fieldtype": "Check",
+   "label": "Require Verified Evidence"
   },
   {
    "collapsible": 1,

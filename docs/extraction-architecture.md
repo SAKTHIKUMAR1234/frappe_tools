@@ -1,5 +1,9 @@
 # Document Extraction — Architecture
 
+Current adapter implementation and customization process:
+[Adapter packages](adapter-packages.md). The design below is historical;
+current review uses extraction staging and adapter-owned UI before the final writer.
+
 Status: **design (approved decisions, pre-implementation)** · 2026-05-25
 
 Scan a document → LLM extracts structured data → build the real (draft) target
@@ -53,7 +57,7 @@ extractors/
       schema.py    # header fields + child tables/columns
       resolve.py   # supplier + item matching cascade
       transform.py # consolidation → common item
-      taxes.py     # India-Compliance-aware tax override (app-gated)
+      taxes.py     # validated company/account tax materialization
       config.py    # rule-book / per-supplier settings
 ```
 
@@ -136,13 +140,14 @@ Row-level mapping first: a line's region ↔ its grid row (open/scroll). Cell-le
 - `taxes.py`: see §7.
 - `config.py`: reads rule-book / per-supplier consolidation + common item.
 
-## 7. App-awareness — India Compliance tax override
-`taxes.py` runs only when `ctx.has_app("india_compliance")`. Decision: **extraction
-governs taxes** — force what the invoice shows (incl. nil / 0% / exempt) and
-**prevent ERPNext from auto-applying the item's configured tax template** (clear
-`item_tax_template` / set `gst_treatment` per the extracted value). IC still computes
-TDS/GST mechanics; we seed/override the inputs. (Exact IC fields to be confirmed
-during implementation against `india_compliance` source.)
+## 7. App-awareness — validated tax boundary
+`taxes.py` always prevents ERPNext from silently applying header tax defaults. When
+India Compliance is installed it also clears item tax templates. A tax row is added
+only after the bounded decision is validated and explicitly applied to review staging:
+the Account must be an enabled leaf owned by the selected Company, and the CGST/SGST/
+IGST amount must equal printed evidence within INR 0.02. Invalid or stale accounting
+choices abort draft creation. Nil/exempt/per-line tax treatment remains an explicit
+future schema extension and cannot be inferred by this v1 adapter.
 
 ## 8. Migration from current code
 - `adapters/` → `extractors/` (registry + base + context + pipeline + generic).
@@ -157,10 +162,32 @@ during implementation against `india_compliance` source.)
 1. Plugin framework (registry/context/base/pipeline/GenericPlugin) — migrate current code.
 2. PI plugin as a structured package.
 3. Verify Split View (real form + scan overlay + two-way highlight) — replace ExtractReviewPanel.
-4. Draft-creation flow + IC-aware tax override + tests (real-PDF harness).
+4. Draft-creation flow + validated tax materialization + tests.
 5. *(Deferred)* Learning-by-doing (Supplier Item Map auto-apply + embeddings).
 
 ## 10. Open / deferred
-- Cell-level (vs row-level) child highlight.
-- Exact India Compliance tax-override field mechanics (verify on implementation).
+- Nil/exempt/per-line India Compliance tax-treatment schema and labeled fixtures.
 - Learning-by-doing — deferred per decision.
+## Reusable backend entry point
+
+Code-owned processes should use the extraction service instead of duplicating
+File, child-page, or queue logic:
+
+```python
+from frappe_tools.extractors.service import enqueue_document_paths
+
+result = enqueue_document_paths(
+    "Purchase Invoice",
+    ["/absolute/local/path/invoice-page-1.jpg"],
+)
+```
+
+The function creates the `Document Extraction`, copies every source into the
+site's private local file store, attaches ordered pages, and enqueues exactly
+one background job. It returns the extraction name and stable queue metadata.
+For multi-step callers, use `create_extraction`, `stage_local_paths` (or
+`stage_data_urls`), and `enqueue` separately.
+
+Path ingestion is intentionally Python-only and rejects HTTP, HTTPS, and S3
+URLs. Browser callers must upload private Files first, preventing a whitelisted
+API from becoming an arbitrary server-file or production-object reader.

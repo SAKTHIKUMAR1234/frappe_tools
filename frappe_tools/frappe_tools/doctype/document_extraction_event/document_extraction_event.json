@@ -1,0 +1,69 @@
+{
+ "actions": [],
+ "creation": "2026-09-03 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "event_time",
+  "stage",
+  "status",
+  "message",
+  "details_json"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "event_time",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Time",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "stage",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Stage",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "status",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Status",
+   "read_only": 1
+  },
+  {
+   "columns": 4,
+   "fieldname": "message",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Message",
+   "read_only": 1
+  },
+  {
+   "fieldname": "details_json",
+   "fieldtype": "Code",
+   "label": "Details",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-09-03 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Extraction Event",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

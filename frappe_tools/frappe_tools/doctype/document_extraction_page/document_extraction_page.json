@@ -6,6 +6,17 @@
  "engine": "InnoDB",
  "field_order": [
   "page_no",
+  "original_page_no",
+  "source_row",
+  "source_file",
+  "scanned_document_detail",
+  "source_page_no",
+  "layout_section",
+  "layout_type",
+  "page_type",
+  "document_sequence",
+  "page_sequence",
+  "layout_confidence",
   "image",
   "file_name",
   "width",
@@ -20,6 +31,76 @@
    "in_list_view": 1,
    "label": "Page No",
    "reqd": 1
+  },
+  {
+   "fieldname": "original_page_no",
+   "fieldtype": "Int",
+   "label": "Original Upload Page",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_row",
+   "fieldtype": "Data",
+   "label": "Source Row",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_file",
+   "fieldtype": "Attach",
+   "label": "Original Source",
+   "read_only": 1
+  },
+  {
+   "fieldname": "scanned_document_detail",
+   "fieldtype": "Link",
+   "label": "Scanned Document Detail",
+   "options": "Scanned Document Detail",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_page_no",
+   "fieldtype": "Int",
+   "label": "Page in Source",
+   "read_only": 1
+  },
+  {
+   "fieldname": "layout_section",
+   "fieldtype": "Link",
+   "label": "Layout Section",
+   "options": "Document Layout Section Title",
+   "read_only": 1
+  },
+  {
+   "fieldname": "layout_type",
+   "fieldtype": "Select",
+   "label": "Layout Type",
+   "options": "\nFront And Back Vertical\nFront And Back Horizontal\nSeries Vertical\nSingle Page",
+   "read_only": 1
+  },
+  {
+   "fieldname": "page_type",
+   "fieldtype": "Select",
+   "label": "Page Type",
+   "options": "\nFront\nBack",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_sequence",
+   "fieldtype": "Int",
+   "label": "Document Sequence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "page_sequence",
+   "fieldtype": "Int",
+   "label": "Page Sequence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "layout_confidence",
+   "fieldtype": "Percent",
+   "label": "Layout Confidence",
+   "read_only": 1
   },
   {
    "columns": 5,
@@ -50,7 +131,7 @@
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-05-25 10:00:00.000000",
+ "modified": "2026-09-03 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Extraction Page",

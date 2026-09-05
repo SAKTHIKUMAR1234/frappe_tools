@@ -19,6 +19,9 @@ def _get_local_file_bytes(file_url: str) -> bytes:
         return f.read()
 
 class ScannedDocument(Document):
+	def after_insert(self):
+		from frappe_tools.scan_lineage import create_reference
+		create_reference(self.name, self._doctype, self._docname)
 		
 	def set_new_document_names(self):
 		

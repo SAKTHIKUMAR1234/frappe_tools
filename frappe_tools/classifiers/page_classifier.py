@@ -7,8 +7,8 @@ Given a set of scanned page images + a list of allowed section labels (the
 section titles of a Document Scanner Layout), it asks the vision model to pick
 exactly one label per page (or 'unknown') and whether each page is Front/Back.
 
-CLASSIFICATION ONLY — it never extracts field/line values. Built on
-frappe_tools.utils.llm.call_vision (OpenRouter/Gemini, JSON mode).
+CLASSIFICATION ONLY — it never extracts field/line values. Built on the
+fail-closed Codex OAuth vision boundary in frappe_tools.utils.llm.
 """
 
 import json

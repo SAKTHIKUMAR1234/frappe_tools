@@ -3,7 +3,10 @@
 Used by GenericPlugin (and reusable by specific plugins that only want to curate).
 """
 
+import json
+
 import frappe
+from frappe.utils import flt
 
 EXTRACTABLE_FIELDTYPES = {
 	"Data", "Small Text", "Text", "Long Text", "Text Editor",
@@ -17,6 +20,10 @@ LINK_FIELDTYPES = {"Link", "Dynamic Link"}
 
 def build_header_schema(target_doctype):
 	meta = frappe.get_meta(target_doctype)
+	rules = field_rule_map(target_doctype)
+	# A configured field grid is an allowlist. Legacy rule books without field
+	# rows retain the old meta-driven behaviour for backwards compatibility.
+	configured = set(rules)
 	schema = []
 	for df in meta.fields:
 		if df.fieldtype not in EXTRACTABLE_FIELDTYPES:
@@ -25,6 +32,8 @@ def build_header_schema(target_doctype):
 			continue
 		if df.fieldname.startswith("_"):
 			continue
+		if configured and df.fieldname not in configured:
+			continue
 		entry = {"fieldname": df.fieldname, "label": df.label or df.fieldname, "fieldtype": df.fieldtype, "required": bool(df.reqd)}
 		if df.fieldtype == "Select" and df.options:
 			entry["options"] = [o for o in (df.options or "").split("\n") if o != ""]
@@ -32,8 +41,69 @@ def build_header_schema(target_doctype):
 			entry["link_doctype"] = df.options
 		if df.description:
 			entry["description"] = df.description
+		if df.fieldname in rules:
+			rule = rules[df.fieldname]
+			entry.update({
+				"required": bool(rule.get("required") or entry["required"]),
+				"minimum_confidence": flt(rule.get("minimum_confidence")) or 0.9,
+				"auto_approve": bool(rule.get("auto_approve", True)),
+				"resolver": rule.get("resolver"),
+				"memory": rule.get("memory"),
+			})
+			if rule.get("label"):
+				entry["label"] = rule["label"]
 		schema.append(entry)
 	return schema
+
+
+def field_rule_map(target_doctype):
+	"""Merged field configuration, highest-priority enabled rule book wins."""
+	out = {}
+	for name in frappe.get_all("Document Rule Book", filters={"target_doctype": target_doctype, "enabled": 1},
+			order_by="priority desc, modified asc", pluck="name"):
+		doc = frappe.get_doc("Document Rule Book", name)
+		for row in doc.field_rules or []:
+			if not row.fieldname or row.fieldname in out:
+				continue
+			filters = {}
+			if row.get("resolver_filters"):
+				try:
+					filters = json.loads(row.resolver_filters)
+				except (TypeError, ValueError):
+					filters = {}
+			out[row.fieldname] = {
+				"label": row.label,
+				"required": bool(row.required),
+				"minimum_confidence": row.get("minimum_confidence"),
+				"auto_approve": bool(row.get("auto_approve", 1)),
+				"resolver": {
+					"type": row.get("resolver_type") or "None",
+					"match_fields": [x.strip() for x in (row.get("resolver_match_fields") or "").split(",") if x.strip()],
+					"filters": filters,
+				},
+				"memory": {
+					"enabled": bool(row.get("memory_enabled")),
+					"scope_fields": [x.strip() for x in (row.get("memory_scope_fields") or "").split(",") if x.strip()],
+					"min_confirmations": max(int(row.get("memory_min_confirmations") or 2), 2),
+				},
+			}
+	return out
+
+
+def validation_rules(target_doctype):
+	"""Return validated declarative rules from enabled books in priority order."""
+	out = []
+	for name in frappe.get_all("Document Rule Book", filters={"target_doctype": target_doctype, "enabled": 1},
+			order_by="priority desc, modified asc", pluck="name"):
+		raw = frappe.db.get_value("Document Rule Book", name, "validation_rules")
+		if not raw:
+			continue
+		try:
+			parsed = json.loads(raw)
+		except (TypeError, ValueError):
+			continue
+		out.extend(parsed if isinstance(parsed, list) else [])
+	return out
 
 
 def rulebook_tables(target_doctype):
@@ -67,8 +137,11 @@ def table_columns_from_meta(target_doctype, table_fieldname, limit=20):
 		if df.fieldname.startswith("_"):
 			continue
 		col = {"key": df.fieldname, "label": df.label or df.fieldname, "type": df.fieldtype}
+		col["required"] = bool(df.reqd)
 		if df.fieldtype == "Link" and df.options:
 			col["link_doctype"] = df.options
+		elif df.fieldtype == "Select" and df.options:
+			col["options"] = [o for o in (df.options or "").split("\n") if o != ""]
 		cols.append(col)
 	return cols[:limit]
 

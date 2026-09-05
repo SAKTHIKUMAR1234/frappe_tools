@@ -1,0 +1,15 @@
+{
+ "actions": [], "autoname": "hash", "doctype": "DocType", "engine": "InnoDB",
+ "field_order": ["scanned_document", "target_doctype", "target_name", "status", "active", "amended_from_reference"],
+ "fields": [
+  {"fieldname":"scanned_document","fieldtype":"Link","in_list_view":1,"label":"Scanned Document","options":"Scanned Document","reqd":1},
+  {"fieldname":"target_doctype","fieldtype":"Link","in_list_view":1,"label":"Target DocType","options":"DocType","reqd":1},
+  {"fieldname":"target_name","fieldtype":"Dynamic Link","in_list_view":1,"label":"Target Document","options":"target_doctype","reqd":1},
+  {"default":"Active","fieldname":"status","fieldtype":"Select","in_list_view":1,"label":"Status","options":"Active\nCancelled\nAmended","reqd":1},
+  {"default":"1","fieldname":"active","fieldtype":"Check","in_list_view":1,"label":"Active"},
+  {"fieldname":"amended_from_reference","fieldtype":"Link","label":"Amended From Reference","options":"Scanned Document Reference","read_only":1}
+ ],
+ "links": [], "modified": "2026-09-01 01:00:00.000000", "modified_by": "Administrator", "module": "Frappe Tools", "name": "Scanned Document Reference",
+ "permissions": [{"create":1,"read":1,"write":1,"delete":1,"role":"System Manager"},{"create":1,"read":1,"write":1,"role":"Scanner User"}],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

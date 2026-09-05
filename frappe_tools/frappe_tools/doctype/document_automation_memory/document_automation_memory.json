@@ -1,0 +1,32 @@
+{
+ "actions": [],
+ "autoname": "field:memory_key",
+ "creation": "2026-08-31 14:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["memory_key", "active", "target_doctype", "target_field", "column_break", "scope_key", "source_normalized", "resolved_value", "stats", "confirmations", "contradictions", "confidence", "last_confirmed_on", "last_confirmed_by", "source_extraction"],
+ "fields": [
+  {"fieldname":"memory_key","fieldtype":"Data","label":"Memory Key","read_only":1,"reqd":1,"unique":1},
+  {"default":"0","fieldname":"active","fieldtype":"Check","in_list_view":1,"label":"Promoted"},
+  {"fieldname":"target_doctype","fieldtype":"Link","in_list_view":1,"label":"Target DocType","options":"DocType","reqd":1},
+  {"fieldname":"target_field","fieldtype":"Data","in_list_view":1,"label":"Target Field","reqd":1},
+  {"fieldname":"column_break","fieldtype":"Column Break"},
+  {"fieldname":"scope_key","fieldtype":"Data","label":"Scope Key","reqd":1,"search_index":1},
+  {"fieldname":"source_normalized","fieldtype":"Data","in_list_view":1,"label":"Normalized Source","reqd":1,"search_index":1},
+  {"fieldname":"resolved_value","fieldtype":"Data","in_list_view":1,"label":"Resolved Value","reqd":1},
+  {"fieldname":"stats","fieldtype":"Section Break","label":"Evidence"},
+  {"default":"0","fieldname":"confirmations","fieldtype":"Int","label":"Confirmations","read_only":1},
+  {"default":"0","fieldname":"contradictions","fieldtype":"Int","label":"Contradictions","read_only":1},
+  {"default":"0","fieldname":"confidence","fieldtype":"Float","label":"Confidence","precision":"3","read_only":1},
+  {"fieldname":"last_confirmed_on","fieldtype":"Datetime","label":"Last Confirmed On","read_only":1},
+  {"fieldname":"last_confirmed_by","fieldtype":"Link","label":"Last Confirmed By","options":"User","read_only":1},
+  {"fieldname":"source_extraction","fieldtype":"Link","label":"Latest Source Extraction","options":"Document Extraction","read_only":1}
+ ],
+ "links": [],
+ "modified": "2026-08-31 14:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Automation Memory",
+ "permissions": [{"create":1,"delete":1,"email":1,"export":1,"print":1,"read":1,"report":1,"role":"System Manager","share":1,"write":1}],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

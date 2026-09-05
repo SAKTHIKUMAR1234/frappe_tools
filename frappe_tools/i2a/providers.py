@@ -18,6 +18,7 @@ from frappe.utils import cint, flt
 from frappe_tools.utils.llm import safe_json_loads
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 TRANSPORT_ATTEMPTS = 3
 TRUNCATION_RETRY_MAX_TOKENS = 16384
 
@@ -45,16 +46,15 @@ def call_model(ai_model, messages, *, json_mode=True, purpose="", run=None, acti
 		ai_model = frappe.get_doc("AI Model", ai_model)
 	if not cint(ai_model.enabled):
 		raise ProviderError(_("AI Model {0} is disabled").format(ai_model.name))
-	if ai_model.provider != "OpenRouter":
-		raise ProviderError(
-			_("Provider {0} has no adapter yet — only OpenRouter is supported").format(ai_model.provider)
-		)
+	if ai_model.provider not in ("OpenRouter", "OpenAI"):
+		raise ProviderError(_("Provider {0} has no adapter yet").format(ai_model.provider))
 
 	tokens = cint(max_tokens) or cint(ai_model.max_tokens) or 8192
 	last_error = None
 
 	for attempt in range(1, TRANSPORT_ATTEMPTS + 1):
-		outcome = _openrouter_attempt(
+		attempt_fn = _openai_attempt if ai_model.provider == "OpenAI" else _openrouter_attempt
+		outcome = attempt_fn(
 			ai_model, messages, json_mode=json_mode, max_tokens=tokens,
 			purpose=purpose, run=run, action=action,
 		)
@@ -83,8 +83,11 @@ def call_with_tools(ai_model, messages, tool_specs, *, purpose="", run=None, act
 		ai_model = frappe.get_doc("AI Model", ai_model)
 	if not cint(ai_model.enabled):
 		raise ProviderError(_("AI Model {0} is disabled").format(ai_model.name))
-	if ai_model.provider != "OpenRouter":
+	if ai_model.provider not in ("OpenRouter", "OpenAI"):
 		raise ProviderError(_("Provider {0} has no adapter yet").format(ai_model.provider))
+	if ai_model.provider == "OpenAI":
+		return _openai_tools(ai_model, messages, tool_specs, purpose=purpose, run=run,
+			action=action, max_tokens=max_tokens, tool_choice=tool_choice)
 
 	api_key = ai_model.get_password("api_key", raise_exception=False)
 	if not api_key:
@@ -272,6 +275,133 @@ def _openrouter_attempt(ai_model, messages, *, json_mode, max_tokens, purpose, r
 	return {"ok": False, "error": error, "transient": transient, "truncated": truncated}
 
 
+def _openai_input(messages):
+	"""Translate Chat Completions messages to Responses API input items."""
+	translated = []
+	for message in messages:
+		parts = message.get("content")
+		if isinstance(parts, str):
+			parts = [{"type": "input_text", "text": parts}]
+		else:
+			out = []
+			for part in parts or []:
+				if not isinstance(part, dict):
+					continue
+				if part.get("type") in ("text", "input_text"):
+					out.append({"type": "input_text", "text": part.get("text") or ""})
+				elif part.get("type") in ("image_url", "input_image"):
+					image = part.get("image_url") or {}
+					url = image.get("url") if isinstance(image, dict) else image
+					url = url or part.get("image_url")
+					out.append({"type": "input_image", "image_url": url,
+						"detail": part.get("detail") or (image.get("detail") if isinstance(image, dict) else None) or "original"})
+			parts = out
+		translated.append({"role": message.get("role") or "user", "content": parts})
+	return translated
+
+
+def _openai_usage(usage):
+	usage = usage or {}
+	return {
+		"prompt_tokens": cint(usage.get("input_tokens")),
+		"completion_tokens": cint(usage.get("output_tokens")),
+		"total_tokens": cint(usage.get("total_tokens")),
+	}
+
+
+def _openai_text(result):
+	chunks = []
+	for item in (result or {}).get("output") or []:
+		if item.get("type") != "message":
+			continue
+		for part in item.get("content") or []:
+			if part.get("type") == "output_text":
+				chunks.append(part.get("text") or "")
+	return "\n".join(chunks)
+
+
+def _openai_attempt(ai_model, messages, *, json_mode, max_tokens, purpose, run, action):
+	api_key = ai_model.get_password("api_key", raise_exception=False)
+	if not api_key:
+		return {"ok": False, "transient": False, "error": _("AI Model {0} has no API key set").format(ai_model.name)}
+	body = {"model": ai_model.model_id, "input": _openai_input(messages), "store": False,
+		"max_output_tokens": max_tokens}
+	if json_mode and cint(ai_model.supports_json_mode):
+		body["text"] = {"format": {"type": "json_object"}}
+	headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+	url = ai_model.base_url or OPENAI_RESPONSES_URL
+	started = time.monotonic()
+	status, http_status, error, result, transient = "Success", None, None, {}, False
+	try:
+		resp = requests.post(url, headers=headers, json=body, timeout=120)
+		http_status = resp.status_code
+		result = resp.json()
+		resp.raise_for_status()
+		if result.get("error"):
+			raise RuntimeError(str(result["error"]))
+		raw_text = _openai_text(result)
+		parsed = safe_json_loads(raw_text)
+		if parsed is None:
+			status = "Error"
+			error = _("unparseable Responses API reply. Raw begins: {0}").format((raw_text or "<empty>")[:200])
+	except requests.Timeout as exc:
+		status, error, transient = "Timeout", str(exc), True
+	except requests.HTTPError as exc:
+		status, error = "Error", (_api_error(result) or str(exc))
+		transient = bool(http_status and (http_status >= 500 or http_status == 429))
+	except Exception as exc:
+		status, error = "Error", (_api_error(result) or str(exc))
+	usage = _openai_usage(result.get("usage") if isinstance(result, dict) else {})
+	latency_ms = int((time.monotonic() - started) * 1000)
+	cost, estimated = _cost(ai_model, usage, status)
+	_log_call(ai_model=ai_model, purpose=purpose, run=run, action=action, status=status,
+		http_status=http_status, latency_ms=latency_ms, usage=usage, cost=cost,
+		cost_estimated=estimated, body=body, result=result, error=error)
+	if status == "Success":
+		return {"ok": True, "data": parsed, "raw_text": raw_text, "usage": usage, "latency_ms": latency_ms}
+	return {"ok": False, "error": error, "transient": transient, "truncated": False}
+
+
+def _openai_tools(ai_model, messages, tool_specs, *, purpose, run, action, max_tokens, tool_choice):
+	api_key = ai_model.get_password("api_key", raise_exception=False)
+	if not api_key:
+		raise ProviderError(_("AI Model {0} has no API key set").format(ai_model.name))
+	tools = []
+	for spec in tool_specs:
+		fn = spec.get("function") or spec
+		tools.append({"type": "function", "name": fn.get("name"), "description": fn.get("description") or "",
+			"parameters": fn.get("parameters") or {"type": "object", "properties": {}}})
+	body = {"model": ai_model.model_id, "input": _openai_input(messages), "store": False,
+		"max_output_tokens": cint(max_tokens) or cint(ai_model.max_tokens) or 8192,
+		"tools": tools, "tool_choice": tool_choice}
+	started = time.monotonic()
+	result, http_status = {}, None
+	try:
+		resp = requests.post(ai_model.base_url or OPENAI_RESPONSES_URL,
+			headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, json=body, timeout=120)
+		http_status = resp.status_code
+		result = resp.json()
+		resp.raise_for_status()
+		calls = []
+		for item in result.get("output") or []:
+			if item.get("type") == "function_call":
+				args = safe_json_loads(item.get("arguments") or "{}")
+				calls.append({"id": item.get("call_id") or item.get("id"), "name": item.get("name"),
+					"arguments": args if args is not None else {"__unparseable_arguments__": (item.get("arguments") or "")[:120]}})
+		usage = _openai_usage(result.get("usage"))
+		latency = int((time.monotonic() - started) * 1000)
+		cost, estimated = _cost(ai_model, usage, "Success")
+		_log_call(ai_model=ai_model, purpose=purpose, run=run, action=action, status="Success", http_status=http_status,
+			latency_ms=latency, usage=usage, cost=cost, cost_estimated=estimated, body=body, result=result, error=None)
+		return {"content": _openai_text(result), "tool_calls": calls, "finish_reason": result.get("status"), "message": result}
+	except Exception as exc:
+		error = _api_error(result) or str(exc)
+		_log_call(ai_model=ai_model, purpose=purpose, run=run, action=action, status="Error", http_status=http_status,
+			latency_ms=int((time.monotonic() - started) * 1000), usage={}, cost=0, cost_estimated=1,
+			body=body, result=result, error=error)
+		raise ProviderError(error)
+
+
 def _looks_truncated(text):
 	if not text:
 		return False
@@ -298,10 +428,16 @@ def _cost(ai_model, usage, status):
 def _log_call(*, ai_model, purpose, run, action, status, http_status, latency_ms, usage, cost, cost_estimated, body, result, error):
 	"""One I2A LLM Call row per physical HTTP attempt. Never raises."""
 	try:
-		log = frappe.new_doc("I2A LLM Call")
-		log.run = run
-		log.action = action
-		log.ai_model = ai_model.name
+		if purpose == "document_vision":
+			log = frappe.new_doc("Document AI Call Log")
+			log.extraction = run
+			log.target_doctype = action
+			log.model = ai_model.model_id or ai_model.name
+		else:
+			log = frappe.new_doc("I2A LLM Call")
+			log.run = run
+			log.action = action
+			log.ai_model = ai_model.name
 		log.provider = ai_model.provider
 		log.purpose = purpose
 		log.status = status
@@ -334,7 +470,7 @@ def _api_error(result):
 def _redact_images(body):
 	"""Redact every embedded media payload from persisted provider audits."""
 	clone = json.loads(json.dumps(body))
-	for message in clone.get("messages", []):
+	for message in clone.get("messages", []) + clone.get("input", []):
 		content = message.get("content")
 		if isinstance(content, list):
 			for part in content:
@@ -344,6 +480,9 @@ def _redact_images(body):
 				if part_type == "image_url":
 					url = (part.get("image_url") or {}).get("url", "")
 					part["image_url"] = {"url": f"<image redacted: {len(url)} chars>"}
+				elif part_type == "input_image":
+					url = str(part.get("image_url") or "")
+					part["image_url"] = f"<image redacted: {len(url)} chars>"
 				elif part_type == "input_audio":
 					audio = part.get("input_audio") or {}
 					data = str(audio.get("data") or "")

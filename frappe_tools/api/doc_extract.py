@@ -11,56 +11,97 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, now_datetime
 
-from frappe_tools.extractors import get_plugin, pipeline
+from frappe_tools.extractors import get_plugin, has_plugin, pipeline, registered_targets
+from frappe_tools.extractors import service as extraction_service
 from frappe_tools.extractors import schema as S
+from frappe_tools.extractors.context import ExtractionContext
 from frappe_tools.utils import llm
 
 
 @frappe.whitelist()
 def get_extractable_doctypes():
-	names = frappe.get_all("Document Rule Book", filters={"enabled": 1}, distinct=True, pluck="target_doctype")
+	names = registered_targets()
 	return [{"doctype": n, "label": _(n)} for n in names if n]
 
 
 @frappe.whitelist()
-def extract_document(target_doctype, images):
+def extract_document(target_doctype=None, images=None):
 	llm.ensure_ready()
-	if not frappe.has_permission(target_doctype, "create"):
+	target_doctype = str(target_doctype or "").strip() or None
+	if target_doctype and not frappe.has_permission(target_doctype, "create"):
 		frappe.throw(_("You do not have permission to create {0}.").format(target_doctype), frappe.PermissionError)
-	if not S.get_rule_books(target_doctype):
-		frappe.throw(_("No enabled rule book exists for {0}. Create one first.").format(target_doctype))
+	if target_doctype and not has_plugin(target_doctype):
+		frappe.throw(_("No code-owned document adapter exists for {0}.").format(target_doctype))
 
 	if isinstance(images, str):
 		images = json.loads(images)
 	if not images:
 		frappe.throw(_("No scanned pages were provided."))
 
-	tables = S.rulebook_tables(target_doctype)
-	extraction = frappe.new_doc("Document Extraction")
-	extraction.target_doctype = target_doctype
-	extraction.status = "Extracting"
-	extraction.line_table = tables[0]["table"] if tables else None
-	extraction.insert()
+	extraction = extraction_service.create_extraction(target_doctype)
+	extraction_service.stage_data_urls(extraction, images)
+	return extraction_service.enqueue(extraction, enqueue_after_commit=True)
 
-	for idx, data_url in enumerate(images, 1):
-		url, w, h = pipeline.save_page_image(data_url, extraction.name, idx)
-		extraction.append("pages", {"page_no": idx, "image": url, "file_name": url.rsplit("/", 1)[-1], "width": w, "height": h})
-	extraction.save()
 
-	frappe.enqueue("frappe_tools.extractors.pipeline.run", queue="long", timeout=900,
-	               extraction_name=extraction.name, enqueue_after_commit=True)
-	return {"extraction": extraction.name, "status": extraction.status}
+@frappe.whitelist()
+def create_extraction_from_files(target_doctype=None, files=None, auto_process=1):
+	"""Create a tracked LR/PI run from one or more already-uploaded local files."""
+	if isinstance(files, str):
+		files = json.loads(files)
+	doc = extraction_service.create_from_file_urls(
+		target_doctype,
+		files,
+		auto_process=bool(cint(auto_process)),
+		check_permissions=True,
+	)
+	return {"extraction": doc.name, "status": "Preparing" if doc.auto_process else doc.status}
+
+
+@frappe.whitelist()
+def create_extraction_from_scanned_details(target_doctype=None, scanned_document_details=None, auto_process=1):
+	"""Reprocess existing Scanned Document Detail rows through any code-owned adapter."""
+	if isinstance(scanned_document_details, str):
+		scanned_document_details = json.loads(scanned_document_details)
+	doc = extraction_service.create_from_scanned_document_details(
+		target_doctype,
+		scanned_document_details,
+		auto_process=bool(cint(auto_process)),
+		check_permissions=True,
+	)
+	return {"extraction": doc.name, "status": "Preparing" if doc.auto_process else doc.status}
 
 
 @frappe.whitelist()
 def get_extraction(extraction):
 	doc = frappe.get_doc("Document Extraction", extraction)
 	doc.check_permission("read")
-	schema_by_name = {s["fieldname"]: s for s in S.build_header_schema(doc.target_doctype)}
 	plugin = get_plugin(doc.target_doctype)
+	schema_by_name = {s["fieldname"]: s for s in plugin.schema(ExtractionContext(doc.target_doctype)).get("header") or []}
 
-	pages = [{"page_no": p.page_no, "image": p.image, "width": cint(p.width), "height": cint(p.height)}
+	pages = [{"page_no": p.page_no, "image": p.image, "width": cint(p.width), "height": cint(p.height),
+		"source_file": p.source_file, "source_page_no": cint(p.source_page_no),
+		"scanned_document_detail": p.scanned_document_detail}
 	         for p in sorted(doc.pages, key=lambda x: cint(x.page_no))]
+	sources = [{
+		"file": row.source_file,
+		"scanned_document_detail": row.scanned_document_detail,
+		"type": row.source_type,
+		"file_name": row.original_file_name,
+		"content_type": row.content_type,
+		"file_size": cint(row.file_size),
+		"content_hash": row.content_hash,
+		"page_from": cint(row.page_from),
+		"page_to": cint(row.page_to),
+		"status": row.status,
+		"error": row.error_message,
+	} for row in doc.source_files]
+	events = [{
+		"time": row.event_time,
+		"stage": row.stage,
+		"status": row.status,
+		"message": row.message,
+		"details": json.loads(row.details_json) if row.details_json else None,
+	} for row in doc.processing_events]
 
 	fields = []
 	for f in doc.extracted_fields:
@@ -94,7 +135,10 @@ def get_extraction(extraction):
 	return {
 		"name": doc.name, "target_doctype": doc.target_doctype, "status": doc.status,
 		"created_document": doc.created_document, "model_used": doc.model_used, "error_log": doc.error_log,
-		"line_table": doc.line_table, "tables": declared, "pages": pages, "fields": fields, "lines": lines,
+		"line_table": doc.line_table, "tables": declared, "sources": sources, "pages": pages,
+		"source_count": cint(doc.source_count), "page_count": cint(doc.page_count),
+		"processing_job_id": doc.processing_job_id, "processing_started_on": doc.processing_started_on,
+		"processing_completed_on": doc.processing_completed_on, "events": events, "fields": fields, "lines": lines,
 		"provenance": plugin.provenance_map(doc),
 	}
 
@@ -151,23 +195,13 @@ def create_document_from_extraction(extraction):
 		frappe.throw(_("A document ({0}) was already created from this extraction.").format(doc.created_document))
 
 	docname = pipeline.build(extraction)
+	from frappe_tools.scan_lineage import finalize_extraction_target
 
-	scanned = _create_scanned_document(doc, docname)
-	doc.created_document = docname
-	doc.scanned_document = scanned
-	doc.status = "Created"
-	doc.save()
-	return {"doctype": doc.target_doctype, "docname": docname}
+	return finalize_extraction_target(doc, docname)
 
 
 def _create_scanned_document(extraction_doc, docname):
-	try:
-		scanned = frappe.new_doc("Scanned Document")
-		scanned._doctype = extraction_doc.target_doctype
-		scanned._docname = docname
-		scanned.flags.ignore_mandatory = True
-		scanned.insert(ignore_permissions=True)
-		return scanned.name
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Linking Scanned Document to created doc failed")
-		return None
+	"""Compatibility alias; new code uses the reusable scan-lineage service."""
+	from frappe_tools.scan_lineage import link_extraction_to_target
+
+	return link_extraction_to_target(extraction_doc, docname)

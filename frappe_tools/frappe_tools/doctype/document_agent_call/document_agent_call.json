@@ -1,0 +1,175 @@
+{
+ "actions": [],
+ "autoname": "format:DOC-AGENT-{YYYY}-{######}",
+ "creation": "2026-09-03 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "reference_doctype",
+  "reference_name",
+  "adapter_id",
+  "ai_model",
+  "provider",
+  "purpose",
+  "column_break_status",
+  "status",
+  "latency_ms",
+  "http_status",
+  "usage_section",
+  "prompt_tokens",
+  "completion_tokens",
+  "cached_tokens",
+  "total_tokens",
+  "column_break_cost",
+  "cost_usd",
+  "cost_estimated",
+  "payload_section",
+  "request_summary",
+  "response_payload",
+  "error_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "label": "Reference",
+   "options": "reference_doctype"
+  },
+  {
+   "fieldname": "adapter_id",
+   "fieldtype": "Data",
+   "label": "Adapter ID"
+  },
+  {
+   "fieldname": "ai_model",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "AI Model",
+   "options": "AI Model",
+   "reqd": 1
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider"
+  },
+  {
+   "fieldname": "purpose",
+   "fieldtype": "Data",
+   "label": "Purpose"
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Success\nError\nTimeout",
+   "reqd": 1
+  },
+  {
+   "fieldname": "latency_ms",
+   "fieldtype": "Int",
+   "label": "Latency (ms)"
+  },
+  {
+   "fieldname": "http_status",
+   "fieldtype": "Int",
+   "label": "HTTP Status"
+  },
+  {
+   "fieldname": "usage_section",
+   "fieldtype": "Section Break",
+   "label": "Usage"
+  },
+  {
+   "fieldname": "prompt_tokens",
+   "fieldtype": "Int",
+   "label": "Prompt Tokens"
+  },
+  {
+   "fieldname": "completion_tokens",
+   "fieldtype": "Int",
+   "label": "Completion Tokens"
+  },
+  {
+   "fieldname": "cached_tokens",
+   "fieldtype": "Int",
+   "label": "Cached Input Tokens"
+  },
+  {
+   "fieldname": "total_tokens",
+   "fieldtype": "Int",
+   "label": "Total Tokens"
+  },
+  {
+   "fieldname": "column_break_cost",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cost_usd",
+   "fieldtype": "Currency",
+   "label": "Direct API Cost (USD)",
+   "precision": "6"
+  },
+  {
+   "default": "0",
+   "fieldname": "cost_estimated",
+   "fieldtype": "Check",
+   "label": "Cost Estimated"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Safe Audit"
+  },
+  {
+   "description": "Contains transport metadata and tool names, not credentials or the full source prompt.",
+   "fieldname": "request_summary",
+   "fieldtype": "Code",
+   "label": "Request Summary",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "response_payload",
+   "fieldtype": "Code",
+   "label": "Structured Response",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-03 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Document Agent Call",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

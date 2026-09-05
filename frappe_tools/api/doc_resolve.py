@@ -8,6 +8,7 @@ the active plugin's capability for the extraction's target DocType.
 import frappe
 from frappe.utils import cint
 
+from frappe_tools.automation import learning as automation_learning
 from frappe_tools.extractors import get_plugin
 from frappe_tools.extractors.context import ExtractionContext
 
@@ -29,12 +30,34 @@ def search_records(doctype, txt="", limit=20):
 def _dispatch(extraction):
 	doc = frappe.get_doc("Document Extraction", extraction)
 	doc.check_permission("write")
+	if doc.status != "Review":
+		frappe.throw(frappe._("Document resolution is available only during review."))
+	frappe.has_permission(doc.target_doctype, "read", throw=True)
+	if doc.get("operation_mode") == "Attach Existing" and doc.get("existing_document"):
+		frappe.has_permission(doc.target_doctype, doc=doc.existing_document, ptype="write", throw=True)
+	else:
+		frappe.has_permission(doc.target_doctype, "create", throw=True)
 	return doc, get_plugin(doc.target_doctype), ExtractionContext(doc.target_doctype)
 
 
 @frappe.whitelist()
 def confirm_line_item(extraction, row_no, item_code):
 	doc, plugin, ctx = _dispatch(extraction)
+	line = next((row for row in doc.lines if cint(row.row_no) == cint(row_no)), None)
+	if not line:
+		frappe.throw(frappe._("Extraction row {0} does not exist.").format(row_no))
+	table = line.table or doc.line_table or "rows"
+	table_spec = next((item for item in plugin.schema(ctx).get("tables") or [] if item.get("table") == table), {})
+	value_key = (table_spec.get("resolver") or {}).get("value_key") or "matched_item"
+	path = f"table:{table}:{cint(row_no)}:{value_key}"
+	if item_code != line.matched_item:
+		automation_learning.record_delta(
+			doc,
+			path,
+			None,
+			item_code,
+			agent_value=automation_learning.decision_value(doc, path),
+		)
 	return plugin.confirm_row(ctx, doc, row_no, item_code)
 
 
@@ -45,11 +68,14 @@ def set_line_freetext(extraction, row_no):
 
 
 @frappe.whitelist()
-def create_item(extraction, row_no, item_group=None, stock_uom=None, item_name=None, item_code=None, hsn=None):
+def create_item(extraction, row_no, item_group=None, stock_uom=None, item_name=None, item_code=None, hsn=None,
+		company=None, expense_account=None, income_account=None, item_tax_template=None, decision_json=None):
 	doc, plugin, ctx = _dispatch(extraction)
 	return plugin.create_row_master(ctx, doc, row_no, {
 		"item_group": item_group, "stock_uom": stock_uom, "item_name": item_name,
 		"item_code": item_code, "hsn": hsn,
+		"company": company, "expense_account": expense_account, "income_account": income_account,
+		"item_tax_template": item_tax_template, "decision_json": decision_json,
 	})
 
 

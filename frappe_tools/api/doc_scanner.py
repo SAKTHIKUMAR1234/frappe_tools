@@ -9,7 +9,6 @@ import json
 from frappe.utils.file_manager import save_file
 from frappe.utils import sbool
 from PIL import Image
-from frappe import get_site_config
 import redis
 from pypika import Order
 
@@ -20,17 +19,23 @@ REDIS_SIGNAL_PREFIX = "doc_scanner_signal"
 REDIS_PIN_PREFIX = "doc_scanner_pin"
 
 def get_redis():
-	conf = get_site_config()
+	# frappe.conf is the merged configuration for the explicitly routed site.
+	# Re-reading a relative config can silently fall back to a different bench's
+	# default Redis port (and bypass this site's isolation settings).
+	url = frappe.conf.get("redis_cache")
+	if not url:
+		frappe.throw("Configure Redis cache for this site before connecting the scanner.")
 	return redis.Redis.from_url(
-		conf.get("redis_cache", "redis://127.0.0.1:13000"),
-		decode_responses=True
+		url, decode_responses=True, socket_connect_timeout=5, socket_timeout=30,
 	)
 
-def _signal_key(room):
-	return f"{REDIS_SIGNAL_PREFIX}:{room}"
+def _signal_key(room, recipient="mobile"):
+	# Redis is shared by every site in a bench.  Include the active site so a
+	# room created for one tenant can never be resolved or consumed by another.
+	return f"{REDIS_SIGNAL_PREFIX}:{frappe.local.site}:{room}:{recipient}"
 
 def _pin_key(pin):
-	return f"{REDIS_PIN_PREFIX}:{pin}"
+	return f"{REDIS_PIN_PREFIX}:{frappe.local.site}:{pin}"
 
 @frappe.whitelist(allow_guest=True)
 def register_pin(room):
@@ -38,8 +43,7 @@ def register_pin(room):
 	for _ in range(10):
 		pin = "".join(random.choices(string.digits, k=4))
 		key = _pin_key(pin)
-		if not r.exists(key):
-			r.set(key, room, ex=600)
+		if r.set(key, room, ex=600, nx=True):
 			return pin
 	frappe.throw("Could not generate PIN, please try again.")
 
@@ -52,18 +56,30 @@ def resolve_pin(pin):
 	return room
 
 
-def add_to_signals(room, signal_data):
+def add_to_signals(room, signal_data, recipient="mobile"):
 
 	r = get_redis()
-	r.rpush(_signal_key(room), json.dumps(signal_data))
+	key = _signal_key(room, recipient)
+	r.rpush(key, json.dumps(signal_data))
+	r.expire(key, 600)
 
 
 @frappe.whitelist(allow_guest=True)
-def get_signal(room, timeout=25):
+def get_signal(room, timeout=25, device="mobile"):
+	"""Poll signals addressed to one side of a WebRTC scanner room.
+
+	`device` names the recipient. Existing mobile callers omit it and retain the
+	original behaviour; the standalone OCR browser uses `web` so it never consumes
+	its own offer or ICE candidates.
+	"""
+	if device not in {"mobile", "web"}:
+		frappe.throw("Invalid scanner device")
 	
 	r = get_redis()
 
-	result = r.blpop(_signal_key(room), timeout=timeout)
+	# Redis timeout=0 means forever, not non-blocking. Never hold a web worker
+	# indefinitely for a disconnected phone or a malformed timeout parameter.
+	result = r.blpop(_signal_key(room, device), timeout=min(25, max(1, int(timeout))))
 
 	if not result:
 		return []
@@ -113,10 +129,19 @@ def send_signal(room, signal_data, device):
 	"""
 	Bidirectional signaling entry point
 	"""
+	if isinstance(signal_data, string_types):
+		signal_data = frappe.parse_json(signal_data)
+	if not isinstance(signal_data, dict):
+		frappe.throw("Invalid scanner signal")
+
 	if device == "web":
-		add_to_signals(room, signal_data)
+		add_to_signals(room, signal_data, recipient="mobile")
 
 	elif device == "mobile":
+		# Preserve the legacy Desk realtime event and also queue the signal for
+		# the standalone `/ocr` client, which intentionally has no Socket.IO
+		# dependency.
+		add_to_signals(room, signal_data, recipient="web")
 		frappe.publish_realtime(
 			event=room,
 			message={

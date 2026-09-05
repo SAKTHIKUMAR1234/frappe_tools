@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+  <rect width="1400" height="900" fill="#f7f1df"/>
+  <rect x="70" y="70" width="1260" height="760" rx="24" fill="#fffdf7" stroke="#263238" stroke-width="5"/>
+  <text x="130" y="185" font-family="DejaVu Sans" font-size="54" font-weight="bold" fill="#17212b">TASK REMINDER</text>
+  <line x1="130" y1="220" x2="1270" y2="220" stroke="#607d8b" stroke-width="3"/>
+  <text x="130" y="340" font-family="DejaVu Sans" font-size="43" fill="#17212b">Task: Review the August LR extraction report</text>
+  <text x="130" y="455" font-family="DejaVu Sans" font-size="43" fill="#17212b">Due date: 05 September 2026</text>
+  <text x="130" y="570" font-family="DejaVu Sans" font-size="43" fill="#17212b">Priority: High</text>
+  <text x="130" y="685" font-family="DejaVu Sans" font-size="43" fill="#17212b">Assignee: Administrator</text>
+  <text x="130" y="770" font-family="DejaVu Sans" font-size="28" fill="#455a64">Create a draft only. Do not submit automatically.</text>
+</svg>

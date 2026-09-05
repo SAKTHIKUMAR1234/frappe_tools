@@ -14,7 +14,9 @@
   "uom",
   "rate",
   "amount",
+  "matched_doctype",
   "matched_item",
+  "master_proposal",
   "resolution_status",
   "match_method",
   "match_confidence",
@@ -24,6 +26,13 @@
   "bbox_json"
  ],
  "fields": [
+  {
+   "fieldname": "master_proposal",
+   "fieldtype": "Link",
+   "label": "New Item Proposal",
+   "options": "Document Item Proposal",
+   "read_only": 1
+  },
   {
    "columns": 1,
    "default": "1",
@@ -82,12 +91,19 @@
    "label": "Amount"
   },
   {
+   "fieldname": "matched_doctype",
+   "fieldtype": "Link",
+   "label": "Matched Record Type",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
    "columns": 2,
    "fieldname": "matched_item",
-   "fieldtype": "Link",
+   "fieldtype": "Dynamic Link",
    "in_list_view": 1,
-   "label": "Matched Item",
-   "options": "Item"
+   "label": "Matched Record",
+   "options": "matched_doctype"
   },
   {
    "columns": 1,
@@ -112,7 +128,7 @@
    "read_only": 1
   },
   {
-   "description": "Ranked candidate items as JSON.",
+   "description": "Ranked candidate records as JSON.",
    "fieldname": "candidates_json",
    "fieldtype": "Code",
    "label": "Candidates JSON",

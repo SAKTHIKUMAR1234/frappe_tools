@@ -33,11 +33,11 @@ def lookup_memory(supplier, text, code=None, target_doctype="Purchase Invoice", 
 		row = frappe.get_all(
 			MAP_DOCTYPE,
 			filters={**scope, "supplier_code": code},
-			fields=["item_code", "uom", "name"],
+			fields=["item_code", "uom", "name", "hit_count", "confidence"],
 			order_by="hit_count desc",
 			limit=1,
 		)
-		if row and frappe.db.exists("Item", row[0].item_code):
+		if row and cint(row[0].hit_count) >= 2 and float(row[0].confidence or 0) >= 0.8 and frappe.db.exists("Item", row[0].item_code):
 			return row[0]
 
 	norm = normalize(text)
@@ -45,11 +45,11 @@ def lookup_memory(supplier, text, code=None, target_doctype="Purchase Invoice", 
 		row = frappe.get_all(
 			MAP_DOCTYPE,
 			filters={**scope, "normalized_text": norm},
-			fields=["item_code", "uom", "name"],
+			fields=["item_code", "uom", "name", "hit_count", "confidence"],
 			order_by="hit_count desc",
 			limit=1,
 		)
-		if row and frappe.db.exists("Item", row[0].item_code):
+		if row and cint(row[0].hit_count) >= 2 and float(row[0].confidence or 0) >= 0.8 and frappe.db.exists("Item", row[0].item_code):
 			return row[0]
 
 	return None

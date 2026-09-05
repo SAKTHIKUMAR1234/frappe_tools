@@ -107,6 +107,15 @@ def _run_inner(state, action, files, context):
 
 	executor, verifier, request_notes = _route(state, action, image_parts)
 	state.executor_doc = executor
+	date_context = [
+		f"{key}={context[key]}" for key in ("date_from", "date_to") if context.get(key)
+	]
+	if date_context:
+		window_note = (
+			"AUTHORITATIVE OPERATIONAL DATE WINDOW: " + ", ".join(date_context)
+			+ ". Use this to resolve ambiguous handwritten years; values outside the window require correction or review."
+		)
+		request_notes = "\n".join(part for part in (request_notes, window_note) if part)
 
 	extraction_raw = state.chat(executor, "extract", session="executor",
 		seed=verify.build_extract_messages(action, image_parts, request_notes))
@@ -193,6 +202,20 @@ def _run_inner(state, action, files, context):
 	catalog = tools.parse_catalog(action)
 	match_result = None
 	agent_result = None
+	# A finalizing tool mutates business data. It is safe only after every
+	# extraction/grounding check passed in a genuinely Automated run. Candidate
+	# discovery still runs when this is false so Manual/uncertain runs retain a
+	# useful review payload, but no invoice can be changed before the gate below.
+	finalize_constraints_ok = _finalize_constraints_pass(fields, schema)
+	allow_finalize = (
+		state.mode == "Automated"
+		and not unresolved
+		and not getattr(state, "mode_degraded", False)
+		and finalize_constraints_ok
+	)
+	if not finalize_constraints_ok:
+		state.step("finalize_constraint_blocked",
+			note="one or more schema fields require human review")
 	if catalog:
 		state.reserved_calls = 0  # the reservation was FOR this phase — release it
 		# deterministic_first (config): resolve by PROOF, not by an LLM tool loop.
@@ -201,17 +224,25 @@ def _run_inner(state, action, files, context):
 		# hallucination surface) is used only as an explicit opt-in fallback.
 		if cint(getattr(action, "deterministic_first", 0)):
 			try:
-				agent_result = _deterministic_resolve(state, action, fields, context, catalog)
+				agent_result = _deterministic_resolve(
+					state, action, fields, context, catalog, allow_finalize=allow_finalize
+				)
 			except Exception as exc:
 				state.step("deterministic_resolve_failed", error=str(exc)[:200])
 			if not (agent_result and agent_result.get("resolved")) and cint(getattr(action, "agent_fallback", 0)):
 				try:
-					agent_result = _agentic_phase(state, action, executor, fields, context, catalog)
+					agent_result = _agentic_phase(
+						state, action, executor, fields, context, catalog,
+						allow_finalize=allow_finalize,
+					)
 				except BudgetExceeded as exc:
 					state.step("budget_stop", at="agent", note=str(exc)[:200])
 		else:
 			try:
-				agent_result = _agentic_phase(state, action, executor, fields, context, catalog)
+				agent_result = _agentic_phase(
+					state, action, executor, fields, context, catalog,
+					allow_finalize=allow_finalize,
+				)
 			except BudgetExceeded as exc:
 				state.step("budget_stop", at="agent", note=str(exc)[:200])
 		if not (agent_result and agent_result.get("resolved")):
@@ -248,6 +279,32 @@ def _run_inner(state, action, files, context):
 		"agent": agent_result,
 		"rounds": state.rounds,
 	}
+
+
+def _finalize_constraints_pass(fields, schema):
+	"""Return false when a schema field explicitly forbids finalization.
+
+	Actions can declare ``finalize_allow_values`` for a required quality/status
+	field. This does not ask repair to erase a genuine warning; it only gates
+	business writes while preserving the extracted warning for review.
+	"""
+	for field in schema:
+		allowed = field.get("finalize_allow_values")
+		if not allowed:
+			continue
+		allowed_norm = {str(value).strip().casefold() for value in allowed}
+		items = fields.get(field.get("key"))
+		if field.get("kind") == "array":
+			items = items if isinstance(items, list) else []
+		else:
+			items = [items] if isinstance(items, dict) else []
+		if not items:
+			return False
+		for item in items:
+			value = item.get("value") if isinstance(item, dict) else None
+			if str(value or "").strip().casefold() not in allowed_norm:
+				return False
+	return True
 
 
 def _corroborate_write(action, tool_def, args, fields, context=None, refs=None):
@@ -308,7 +365,7 @@ def _corroborate_write(action, tool_def, args, fields, context=None, refs=None):
 	return bool(match.is_corroborated(row, mcfg, fields, for_gate=True))
 
 
-def _deterministic_resolve(state, action, fields, context, catalog):
+def _deterministic_resolve(state, action, fields, context, catalog, allow_finalize=True):
 	"""Proof-based resolution with ZERO judgment LLM calls (deterministic_first).
 
 	The document's references are matched against the ERP by the config's own
@@ -343,7 +400,7 @@ def _deterministic_resolve(state, action, fields, context, catalog):
 		"context": context or {},
 	}
 	applied_targets, calls = [], []
-	if fin:
+	if fin and allow_finalize:
 		arg = fin["corroborate"]["arg"]
 		by_ref = {}
 		for m in matches:
@@ -370,6 +427,9 @@ def _deterministic_resolve(state, action, fields, context, catalog):
 			state.step("deterministic_apply", ref=ref, target=target, ok=ok)
 			if ok:
 				applied_targets.append(target)
+	elif fin:
+		state.step("finalize_blocked", mode=state.mode,
+			note="manual, degraded, or unresolved extraction — candidates only")
 
 	# coverage: which references (the corroborate rules' `from` fields) exist,
 	# and which got applied — resolved only when EVERY reference is covered.
@@ -396,7 +456,7 @@ def _deterministic_resolve(state, action, fields, context, catalog):
 	}
 
 
-def _agentic_phase(state, action, executor, fields, context, catalog):
+def _agentic_phase(state, action, executor, fields, context, catalog, allow_finalize=True):
 	"""Tool-calling loop: the model uses the action's exposed tools to verify
 	and resolve the extracted document itself (search ERP → apply), replacing
 	human review. Every tool call is logged; write tools carry the run's
@@ -521,9 +581,9 @@ def _agentic_phase(state, action, executor, fields, context, catalog):
 			# Manual mode NEVER autonomously writes: a finalizing tool is refused
 			# (the model is told to flag instead) so a non-Automated batch only
 			# ever produces review candidates, never an invoice write.
-			if tool_def.get("finalizes") and state.mode != "Automated":
-				result = {"error": "manual mode: do not apply autonomously — call the "
-					"review/flag tool so a human confirms this match"}
+			if tool_def.get("finalizes") and not allow_finalize:
+				result = {"error": "finalization blocked: manual, degraded, or unresolved "
+					"extraction — call the review/flag tool so a human confirms this match"}
 			# Once an escalation landed, no further FINALIZING write may run in
 			# the same batch — a parallel [flag, apply] emission must not let the
 			# apply clobber the human handoff the flag just recorded.
@@ -855,6 +915,10 @@ def _model_verify(state, action, verifier, image_parts, fields, gctx=None, only=
 		index, ok = _sanitize_index(schema, d["field"], d.get("index"), fields)
 		if not ok:
 			continue
+		item = verify._item_for(fields, d["field"], index)
+		schema_field = next((field for field in schema if field["key"] == d["field"]), {})
+		if _verifier_report_is_agreement(d, item, schema_field):
+			continue
 		disagreements.append({
 			"field": d["field"],
 			"index": index,
@@ -862,6 +926,31 @@ def _model_verify(state, action, verifier, image_parts, fields, gctx=None, only=
 			"detail": f"verifier: image shows {d.get('expected')!r} ({d.get('reason', '')})"[:300],
 		})
 	return disagreements
+
+
+def _verifier_report_is_agreement(report, item, schema_field):
+	"""Ignore verifier rows that affirm the claim but were put in the wrong list.
+
+	Some JSON-capable models emit one row per claim under ``disagreements`` and
+	write ``Match``/``No disagreement`` as the reason. They also compare printed
+	date text with a canonically formatted value and call that a format mismatch.
+	The engine owns canonical formatting, so an expected read that normalizes to
+	the stored value is agreement. Invalid expected values remain disagreements.
+	"""
+	reason = " ".join(str(report.get("reason") or "").lower().split()).strip(" .")
+	if reason in {"match", "matches", "no disagreement", "no discrepancy", "correct"}:
+		return True
+	if not item or report.get("expected") in (None, ""):
+		return False
+	expected, valid = extract.normalize_value(
+		report["expected"], schema_field.get("format"), raw_text=report["expected"]
+	)
+	if not valid:
+		return False
+	actual = item.get("value")
+	if isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+		return expected == actual
+	return "".join(str(expected).casefold().split()) == "".join(str(actual).casefold().split())
 
 
 def _repair(state, action, executor, verifier, image_parts, fields, deficiencies, gctx=None):
@@ -1090,7 +1179,15 @@ def _freeform_repair(state, action, executor, image_parts, fields, deficiencies,
 		if (key, index) not in allowed and (key, None) not in allowed:
 			dropped.append({"field": key, "index": index, "note": "not among the asked deficiencies"})
 			continue
-		item = verify._item_for(fields, key, index)
+		entry = fields.get(key)
+		if schema_field.get("kind") == "array":
+			# Missing required arrays may be repaired with several new indexes in
+			# one reply. The review helper intentionally falls back to item 0 for
+			# display, but repair must use exact indexing or index 1/2 would
+			# overwrite the first newly materialized reference.
+			item = entry[index] if isinstance(entry, list) and index is not None and 0 <= index < len(entry) else None
+		else:
+			item = entry
 		old_bbox = item.get("bbox") if item else None
 		old_value = item.get("value") if item else None
 		if item is None:

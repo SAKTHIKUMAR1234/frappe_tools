@@ -21,6 +21,8 @@
   "postprocess_section",
   "consolidate_lines",
   "common_item"
+  ,"validation_section"
+  ,"validation_rules"
  ],
  "fields": [
   {
@@ -119,6 +121,18 @@
    "fieldtype": "Link",
    "label": "Common Item",
    "options": "Item"
+  },
+  {
+   "fieldname": "validation_section",
+   "fieldtype": "Section Break",
+   "label": "Declarative Validation"
+  },
+  {
+   "description": "JSON list of safe rules. V1 supports required_if, equals, date_order and sum_equals. Rules only read configured extraction values; they never execute code.",
+   "fieldname": "validation_rules",
+   "fieldtype": "Code",
+   "label": "Validation Rules (JSON)",
+   "options": "JSON"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -11,6 +11,14 @@
   "instruction",
   "example",
   "output_format"
+  ,"resolver_type"
+  ,"resolver_match_fields"
+  ,"resolver_filters"
+  ,"minimum_confidence"
+  ,"auto_approve"
+  ,"memory_enabled"
+  ,"memory_scope_fields"
+  ,"memory_min_confirmations"
  ],
  "fields": [
   {
@@ -54,6 +62,64 @@
    "fieldname": "output_format",
    "fieldtype": "Data",
    "label": "Output Format"
+  },
+  {
+   "default": "None",
+   "description": "How an extracted value is resolved to a Frappe Link. Exact matches only one unique candidate; Search proposes candidates but never approves them automatically.",
+   "fieldname": "resolver_type",
+   "fieldtype": "Select",
+   "label": "Resolver",
+   "options": "None\nExact\nSearch"
+  },
+  {
+   "description": "Comma-separated fields on the linked DocType, e.g. name,supplier_name,tax_id. Only real searchable fields are used.",
+   "fieldname": "resolver_match_fields",
+   "fieldtype": "Small Text",
+   "label": "Resolver Match Fields"
+  },
+  {
+   "description": "Optional fixed JSON filters applied to every candidate lookup. Extracted/model data cannot override these filters.",
+   "fieldname": "resolver_filters",
+   "fieldtype": "Code",
+   "label": "Resolver Filters (JSON)",
+   "options": "JSON"
+  },
+  {
+   "default": "0.9",
+   "description": "Minimum model confidence before this field may be auto-approved. Verified source evidence is still mandatory.",
+   "fieldname": "minimum_confidence",
+   "fieldtype": "Float",
+   "label": "Minimum Confidence",
+   "precision": "2"
+  },
+  {
+   "default": "1",
+   "description": "Allow verified values above the configured threshold to be approved automatically. Disable for accounting or policy-sensitive fields.",
+   "fieldname": "auto_approve",
+   "fieldtype": "Check",
+   "label": "Allow Auto Approval"
+  },
+  {
+   "default": "0",
+   "description": "Learn this resolved value only from reviewer-confirmed edits. Model output alone never trains memory.",
+   "fieldname": "memory_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Scoped Memory"
+  },
+  {
+   "depends_on": "eval:doc.memory_enabled",
+   "description": "Comma-separated target fields forming the memory scope, e.g. company,supplier. Empty means target-DocType global scope.",
+   "fieldname": "memory_scope_fields",
+   "fieldtype": "Small Text",
+   "label": "Memory Scope Fields"
+  },
+  {
+   "default": "2",
+   "depends_on": "eval:doc.memory_enabled",
+   "description": "Repeated independent reviewer confirmations required before memory can resolve automatically.",
+   "fieldname": "memory_min_confirmations",
+   "fieldtype": "Int",
+   "label": "Promotion Confirmations"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -9,6 +9,7 @@ import json
 import shutil
 import sys
 import os
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -17,8 +18,9 @@ import fake_frappe
 
 FRAPPE, REQUESTS = fake_frappe.install()
 
-sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/frappe_tools")
-sys.path.insert(0, "/mnt/storage/dev/frappe-v15/apps/essdee")
+APPS_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(APPS_DIR / "frappe_tools"))
+sys.path.insert(0, str(APPS_DIR / "essdee"))
 
 from frappe_tools.i2a import engine, ground, providers, verify  # noqa: E402
 

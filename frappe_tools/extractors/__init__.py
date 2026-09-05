@@ -11,7 +11,9 @@ import importlib
 import frappe
 
 _REGISTRY = {}
+_DECLARED = {}
 _LOADED = False
+_HOOKS = None
 
 # Plugins are contributed by ANY installed app via its hooks.py:
 #   doc_extraction_plugins = ["my_app.path.to.plugin", ...]
@@ -21,24 +23,27 @@ _LOADED = False
 
 def register(cls):
 	"""Class decorator: register an ExtractionPlugin subclass by (system, doctype)."""
-	_REGISTRY[(cls.system, cls.target_doctype)] = cls
+	_DECLARED[f"{cls.__module__}.{cls.__name__}"] = cls
 	return cls
 
 
 def _ensure_loaded():
-	global _LOADED
-	if _LOADED:
+	global _LOADED, _HOOKS, _REGISTRY
+	modules = tuple(frappe.get_hooks("doc_extraction_plugins") or [])
+	if _LOADED and _HOOKS == modules:
 		return
-	_LOADED = True
-	try:
-		modules = frappe.get_hooks("doc_extraction_plugins") or []
-	except Exception:
-		modules = []
 	for module in modules:
-		try:
-			importlib.import_module(module)
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), f"Extraction plugin import failed: {module}")
+		importlib.import_module(module)
+	active = {}
+	for cls in _DECLARED.values():
+		if not any(cls.__module__ == module or cls.__module__.startswith(module + ".") for module in modules):
+			continue
+		key = (cls.system, cls.target_doctype)
+		if key in active and active[key] is not cls:
+			raise RuntimeError(f"More than one installed adapter owns {key}")
+		active[key] = cls
+	# A worker can serve multiple sites with different installed apps.
+	_REGISTRY, _HOOKS, _LOADED = active, modules, True
 
 
 def get_plugin(target_doctype, system="ERPNext"):
@@ -52,3 +57,9 @@ def get_plugin(target_doctype, system="ERPNext"):
 def has_plugin(target_doctype, system="ERPNext"):
 	_ensure_loaded()
 	return (system, target_doctype) in _REGISTRY
+
+
+def registered_targets(system="ERPNext"):
+	"""Targets exposed by code-owned adapters; UI data never defines flows."""
+	_ensure_loaded()
+	return sorted(doctype for (registered_system, doctype) in _REGISTRY if registered_system == system)
