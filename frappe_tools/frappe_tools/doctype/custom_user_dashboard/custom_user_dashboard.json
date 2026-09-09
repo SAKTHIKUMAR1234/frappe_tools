@@ -2,7 +2,7 @@
  "actions": [],
  "allow_rename": 1,
  "autoname": "field:route",
- "creation": "2026-07-21 00:00:00.000000",
+ "creation": "2026-07-21 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -25,7 +25,7 @@
    "reqd": 1
   },
   {
-   "description": "Public link slug. Auto-filled from the title; served at /user-dashboard?name=<route>.",
+   "description": "Public link slug. Auto-filled from the title; served at /user-dashboard?name=&lt;route&gt;.",
    "fieldname": "route",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -44,7 +44,7 @@
   },
   {
    "default": "1",
-   "description": "On: only the logged-in users listed below may view it. Off: PUBLIC — anyone with the link can view it (no login).",
+   "description": "On: only the logged-in users listed below may view it. Off: PUBLIC \u2014 anyone with the link can view it (no login).",
    "fieldname": "require_auth",
    "fieldtype": "Check",
    "in_list_view": 1,
@@ -78,7 +78,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-21 13:00:00.000000",
+ "modified": "2026-09-09 18:03:42.713608",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Custom User Dashboard",
@@ -98,13 +98,29 @@
    "write": 1
   },
   {
+   "email": 1,
+   "export": 1,
+   "print": 1,
    "read": 1,
    "report": 1,
-   "role": "AI Bot"
+   "role": "AI Bot",
+   "select": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "if_owner": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Custom User Dashboard Manager",
+   "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "track_changes": 1
+ "states": []
 }
