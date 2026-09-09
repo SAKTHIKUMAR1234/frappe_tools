@@ -1433,7 +1433,7 @@ def _finalize(run_doc, state):
 		totals = frappe.get_all(
 			"I2A LLM Call",
 			filters={"run": run_doc.name},
-			fields=["sum(total_tokens) as tokens", "sum(cost_usd) as cost", "max(cost_estimated) as est"],
+			fields=[{"SUM": "total_tokens", "as": "tokens"}, {"SUM": "cost_usd", "as": "cost"}, {"MAX": "cost_estimated", "as": "est"}],
 		)
 		row = totals[0] if totals else {}
 		run_doc.total_tokens = cint(row.get("tokens"))

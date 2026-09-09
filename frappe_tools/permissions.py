@@ -99,10 +99,10 @@ def ai_bot_guard_write(doc, method=None):
 	blocked by DocPerm (no write rows), and a user who ALSO holds a separate
 	write-granting role must be allowed to use it. System Managers are never
 	restricted; trusted server writes that set ignore_permissions are exempt."""
+	if getattr(getattr(doc, "flags", None), "ignore_permissions", False):
+		return
 	roles = frappe.get_roles(frappe.session.user)
 	if ROLE not in roles or "System Manager" in roles:
-		return
-	if getattr(getattr(doc, "flags", None), "ignore_permissions", False):
 		return
 	if getattr(doc, "doctype", None) not in ESCALATION_DOCTYPES:
 		return
