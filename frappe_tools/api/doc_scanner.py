@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from frappe_tools.utils import save_file_always_new
 import frappe
 from six import string_types
@@ -18,6 +20,25 @@ import string
 
 REDIS_SIGNAL_PREFIX = "doc_scanner_signal"
 REDIS_PIN_PREFIX = "doc_scanner_pin"
+TURN_SCHEMES = {"turn", "turns"}
+
+
+def _get_ice_server_config(server):
+	url = str(server.get("url") or "").strip()
+	if not url:
+		return None
+
+	username = server.get("username")
+	credential = server.get("password")
+	if urlsplit(url).scheme.lower() in TURN_SCHEMES and not (username and credential):
+		return None
+
+	config = {"urls": url}
+	if username:
+		config["username"] = username
+	if credential:
+		config["credential"] = credential
+	return config
 
 def get_redis():
 	conf = get_site_config()
@@ -77,14 +98,8 @@ def get_ice_servers():
 	settings = frappe.get_single("Document Scanner Settings")
 	ice_servers = []
 	for server in settings.stun_and_turn_servers:
-		config = {
-			"urls": server.url
-		}
-		if server.username:
-			config["username"] = server.username
-		if server.password:
-			config["credential"] = server.password
-		ice_servers.append(config)
+		if config := _get_ice_server_config(server):
+			ice_servers.append(config)
 	return ice_servers
 
 @frappe.whitelist(allow_guest=True)
