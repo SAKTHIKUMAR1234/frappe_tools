@@ -161,12 +161,21 @@ const imageChunks = new Map()
 
 const iceServers = ref([])
 
+function isValidIceServer(server) {
+    if (!server || !server.urls) return false
+
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+    const usesTurn = urls.some((url) => /^turns?:/i.test(String(url)))
+    return !usesTurn || Boolean(server.username && server.credential)
+}
+
 async function fetchIceServers() {
     return new Promise((resolve, reject) => {
         frappe.call({
             method: 'frappe_tools.api.doc_scanner.get_ice_servers',
             callback: (r) => {
-                iceServers.value = r.message || []
+                const servers = Array.isArray(r.message) ? r.message : []
+                iceServers.value = servers.filter(isValidIceServer)
                 resolve(iceServers.value)
             },
             error: (err) => reject(err)
