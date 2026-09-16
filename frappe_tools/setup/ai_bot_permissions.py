@@ -28,8 +28,11 @@ def setup_ai_bot_permissions():
 	     a previous run).
 	  3. Wipes every AI Bot row in Has Role for Report / Page parenttype.
 	     These get rebuilt below for whichever reports/pages currently exist.
-	  4. Adds AI Bot rows back for every current doctype / restricted report /
-	     restricted page, at every permlevel the doctype uses.
+	  4. Deletes leftover AI Bot rows on child-table (`istable`) DocTypes,
+	     even if those doctypes are protected — Frappe inherits child access
+	     from the parent, and a direct row on the child is invalid.
+	  5. Adds AI Bot rows back for every standalone (non-istable) doctype /
+	     restricted report / restricted page, at every permlevel the doctype uses.
 
 	Custom DocPerm vs DocPerm: when a doctype already has any Custom DocPerm
 	row, AI Bot is added to Custom DocPerm too — otherwise its standard DocPerm
@@ -41,6 +44,11 @@ def setup_ai_bot_permissions():
 	ensure_scanner_role()
 	protected = _get_protected_doctypes()
 	cleanup_ai_bot_rows(protected_doctypes=protected)
+	# Child-table DocTypes inherit access from their parent. Direct AI Bot rows
+	# on istable DocTypes (e.g. Logs To Clear) make Frappe reject child fields
+	# such as ref_doctype when the parent form loads. Strip them even if the
+	# doctype is on the protected list — those rows are never valid.
+	cleanup_ai_bot_rows_on_child_doctypes()
 	setup_doctype_permissions(protected_doctypes=protected)
 	setup_report_permissions()
 	setup_page_permissions()
@@ -183,6 +191,30 @@ def cleanup_ai_bot_rows(protected_doctypes):
 	frappe.db.commit()
 
 
+def cleanup_ai_bot_rows_on_child_doctypes():
+	"""Delete every AI Bot DocPerm / Custom DocPerm row on istable DocTypes.
+
+	Frappe never uses those rows: child-table access is inherited from the
+	parent. Leaving them in place is actively harmful (Error Log → Logs To
+	Clear.ref_doctype is the known failure).
+	"""
+	child_doctypes = _child_doctypes()
+	if not child_doctypes:
+		return
+	frappe.db.delete("DocPerm", {"role": ROLE_NAME, "parent": ("in", child_doctypes)})
+	frappe.db.delete("Custom DocPerm", {"role": ROLE_NAME, "parent": ("in", child_doctypes)})
+	frappe.db.commit()
+
+
+def _child_doctypes():
+	return frappe.get_all("DocType", filters={"istable": 1}, pluck="name")
+
+
+def _standalone_doctypes():
+	"""DocTypes that own their own permission rows (not child tables)."""
+	return frappe.get_all("DocType", filters={"istable": 0}, pluck="name")
+
+
 def reset_ai_bot_permissions():
 	"""Full reset: delete ALL AI Bot doctype/report/page permissions (ignoring
 	the protected list too) and re-seed from scratch — READ-ONLY on every
@@ -204,9 +236,12 @@ def reset_ai_bot_permissions():
 
 
 def setup_doctype_permissions(protected_doctypes):
-	"""Add AI Bot read rows to every DocType at every permlevel it uses.
+	"""Add AI Bot read rows to every standalone DocType at every permlevel.
 
-	For each doctype (skipping those in `protected_doctypes`):
+	Child-table DocTypes (`istable=1`) are skipped: Frappe inherits their
+	access from the parent, and a direct DocPerm row on the child is invalid.
+
+	For each remaining doctype (skipping those in `protected_doctypes`):
 	  1. Pick the target table — Custom DocPerm if the doctype already has any
 	     Custom DocPerm rows, otherwise standard DocPerm.
 	  2. Collect every distinct permlevel present on the doctype's fields plus
@@ -217,7 +252,7 @@ def setup_doctype_permissions(protected_doctypes):
 	non-protected doctype, so the inner existence-check is mainly belt-and-
 	braces for re-entrancy.
 	"""
-	doctypes = frappe.get_all("DocType", pluck="name")
+	doctypes = _standalone_doctypes()
 
 	doctypes_with_custom = set(
 		frappe.get_all("Custom DocPerm", pluck="parent", distinct=True)
