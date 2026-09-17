@@ -149,11 +149,10 @@ watch(() => props.is_new, (val) => {
     localIsNew.value = val;
 });
 
-const emit = defineEmits(['reload_session']);
-
-
 let pc = null
 let dataChannel = null
+let disconnectGraceTimer = null
+const ICE_DISCONNECT_GRACE_MS = 4000
 
 const pendingCandidates = []
 const imageChunks = new Map()
@@ -205,10 +204,26 @@ function playBeep() {
 }
 
 
+function clearDisconnectGrace() {
+    if (disconnectGraceTimer) {
+        clearTimeout(disconnectGraceTimer)
+        disconnectGraceTimer = null
+    }
+}
+
+function dropPeerAndRenewSession() {
+    if (!pc && !dataChannel) return
+    sessionStore.disconnect()
+    destroyPeer()
+    sessionStore.generatePin()
+}
+
 function destroyPeer() {
+    clearDisconnectGrace()
     try {
         if (dataChannel) {
             dataChannel.onopen = null
+            dataChannel.onclose = null
             dataChannel.onmessage = null
             dataChannel.close()
         }
@@ -274,6 +289,14 @@ function createPeer() {
 
     dataChannel.onopen = () => {
         console.log('DataChannel OPEN')
+        clearDisconnectGrace()
+        sessionStore.connect()
+    }
+
+    dataChannel.onclose = () => {
+        if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'closed')) {
+            dropPeerAndRenewSession()
+        }
     }
 
     dataChannel.onmessage = handleDataMessage
@@ -281,19 +304,25 @@ function createPeer() {
     pc.onicecandidate = handleIceCandidate
 
     pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
+        if (!pc) return
+        const state = pc.connectionState
+        if (state === 'connected') {
+            clearDisconnectGrace()
             sessionStore.connect()
+            return
         }
-
-        if (
-            pc.connectionState === 'disconnected' ||
-            pc.connectionState === 'failed' ||
-            pc.connectionState === 'closed'
-        ) {
-            sessionStore.disconnect()
-            destroyPeer()
-            emit('reload_session');
-            sessionStore.generatePin();
+        if (state === 'disconnected') {
+            if (disconnectGraceTimer) return
+            disconnectGraceTimer = setTimeout(() => {
+                disconnectGraceTimer = null
+                if (pc && pc.connectionState === 'disconnected') {
+                    dropPeerAndRenewSession()
+                }
+            }, ICE_DISCONNECT_GRACE_MS)
+            return
+        }
+        if (state === 'failed' || state === 'closed') {
+            dropPeerAndRenewSession()
         }
     }
 }
