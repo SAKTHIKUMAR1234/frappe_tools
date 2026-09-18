@@ -337,11 +337,14 @@ def save_page_image(data_url, extraction_name, page_no):
 
 
 def file_to_data_url(file_url):
-	file_doc = frappe.get_doc("File", {"file_url": file_url})
-	content = file_doc.get_content()
-	ext = (file_url.rsplit(".", 1)[-1] or "jpeg").lower()
-	mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
-	return f"data:{mime};base64,{base64.b64encode(content).decode()}"
+	# Share the S3-aware reader used by I2A; proxy URLs have no reliable extension.
+	from frappe_tools.i2a.extract import file_to_image_part
+
+	part = file_to_image_part(file_url)
+	url = part["image_url"]["url"]
+	if not url.startswith("data:image/"):
+		raise ValueError("Upload scanned page images; this extraction path does not accept PDF files directly.")
+	return url
 
 
 def publish(extraction, status, error=None):
