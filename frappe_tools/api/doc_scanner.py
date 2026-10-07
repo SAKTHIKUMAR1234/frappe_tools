@@ -7,6 +7,7 @@ from six import string_types
 import base64
 import io
 import uuid
+import re
 import json
 from frappe.utils.file_manager import save_file
 from frappe.utils import sbool
@@ -348,7 +349,13 @@ def upload_image(image_data):
 	return doc.name
 
 
-def create_image_upload(attach, doctype, docname, fieldname="attachment"):
+def get_direct_attachment_file_stem(doctype, docname):
+	"""Return {doctype}_{docname}_{unique}, safe for file paths."""
+	stem = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{doctype}_{docname}")
+	return f"{stem}_{frappe.generate_hash(length=10)}"
+
+
+def create_image_upload(attach, doctype, docname, fieldname="attachment", file_stem=None):
 	if attach.startswith("data:"):
 		header, attach = attach.split(",", 1)
 		mime = header.split(";")[0].split(":")[1]
@@ -371,7 +378,7 @@ def create_image_upload(attach, doctype, docname, fieldname="attachment"):
 	except Exception:
 		frappe.throw("Invalid or unsupported image format")
 
-	file_name = f"{uuid.uuid4()}.{ext}"
+	file_name = f"{file_stem or uuid.uuid4()}.{ext}"
 
 	file_doc = save_file_always_new(
 		fname=file_name,
@@ -484,7 +491,13 @@ def attach_image_to_field(doctype, docname, fieldname, image_data):
 		if old_file:
 			frappe.delete_doc("File", old_file, ignore_permissions=True)
 
-	file_doc = create_image_upload(image_data, doctype, docname, fieldname=fieldname)
+	file_doc = create_image_upload(
+		image_data,
+		doctype,
+		docname,
+		fieldname=fieldname,
+		file_stem=get_direct_attachment_file_stem(doctype, docname),
+	)
 
 	# Reload doc since old file delete may have cleared the field
 	doc.reload()
