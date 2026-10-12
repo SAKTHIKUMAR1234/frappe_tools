@@ -11,7 +11,8 @@
   "layout_type",
   "is_deleted",
   "page_type",
-  "title"
+  "title",
+  "original_attachment"
  ],
  "fields": [
   {
@@ -61,12 +62,18 @@
    "label": "Title",
    "options": "Document Layout Section Title",
    "reqd": 1
+  },
+  {
+   "fieldname": "original_attachment",
+   "fieldtype": "Attach",
+   "label": "Original Attachment",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-08 15:28:41.060433",
+ "modified": "2026-10-12 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Scanned Document Detail",

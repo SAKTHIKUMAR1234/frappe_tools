@@ -8,7 +8,12 @@
  "field_order": [
   "_doctype",
   "_docname",
-  "scanner_layout"
+  "scanner_layout",
+  "ai_check_status",
+  "ai_layout_confidence",
+  "ai_checked_on",
+  "ai_error",
+  "ai_reviewed"
  ],
  "fields": [
   {
@@ -34,12 +39,51 @@
    "label": "Scanner Layout",
    "options": "Document Scanner Layout",
    "reqd": 1
+  },
+  {
+   "fieldname": "ai_check_status",
+   "fieldtype": "Select",
+   "label": "AI Check Status",
+   "options": "\nQueued\nDone\nNeeds Review\nFailed",
+   "read_only": 1,
+   "no_copy": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "ai_layout_confidence",
+   "fieldtype": "Float",
+   "label": "AI Layout Confidence",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "ai_checked_on",
+   "fieldtype": "Datetime",
+   "label": "AI Checked On",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "ai_error",
+   "fieldtype": "Small Text",
+   "label": "AI Error",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "ai_reviewed",
+   "fieldtype": "Check",
+   "label": "AI Reviewed",
+   "default": "0",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Human reviewed; AI checks cannot change this scan."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-27 07:19:37.486447",
+ "modified": "2026-10-12 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Scanned Document",
