@@ -85,7 +85,7 @@ def get_scan_pdf(name):
 
 	frappe.local.response.filename = f"Document_Scan_{name}.pdf"
 	frappe.local.response.filecontent = pdf
-	frappe.local.response.type = "download"
+	frappe.local.response.type = "pdf"
 
 
 def compress_image(source, max_width_px=1080, quality=80):
