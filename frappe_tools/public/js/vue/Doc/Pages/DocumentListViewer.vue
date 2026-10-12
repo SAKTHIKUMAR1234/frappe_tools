@@ -85,9 +85,22 @@ function viewDocument(doc) {
 
 function printScannedDocuments(doc) {
     const url = `/api/method/frappe_tools.frappe_tools.doctype.scanned_document.scanned_document.get_scan_pdf?`
-        + `&name=${encodeURIComponent(doc.name)}`;
+        + `name=${encodeURIComponent(doc.name)}`;
 
-    window.open(url, "_blank");
+    const dialog = new frappe.ui.Dialog({
+        title: doc.name,
+        size: "extra-large",
+        fields: [{ fieldtype: "HTML", fieldname: "preview_html" }],
+        primary_action_label: __("Download"),
+        primary_action() {
+            $("<a>", { href: url, download: `Document_Scan_${doc.name}.pdf` })[0].click();
+        },
+    });
+    dialog.$wrapper.find(".modal-dialog").css({ width: "95vw", maxWidth: "95vw" });
+    $("<iframe>", { src: url, title: doc.name })
+        .css({ width: "100%", height: "85vh", border: 0 })
+        .appendTo(dialog.fields_dict.preview_html.wrapper);
+    dialog.show();
 }
 
 
