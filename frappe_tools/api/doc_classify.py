@@ -5,7 +5,6 @@
 
 import frappe
 from frappe import _
-
 from frappe_tools.classifiers import page_classifier
 from frappe_tools.extractors.pipeline import file_to_data_url
 
@@ -13,6 +12,22 @@ from frappe_tools.extractors.pipeline import file_to_data_url
 def _layout_sections(layout_name):
 	layout = frappe.get_doc("Document Scanner Layout", layout_name)
 	return [{"title": s.title, "layout_type": s.layout_type} for s in layout.layout_doctype_sections]
+
+
+def load_classification_pages(scanned_document: str, *, for_update: bool = False) -> tuple[list, list[str]]:
+	"""Share ordered active pages and the existing S3-aware image reader."""
+	details = frappe.get_all(
+		"Scanned Document Detail",
+		filters={"scanner_document": scanned_document, "is_deleted": 0},
+		fields=["name", "attachment", "original_attachment", "page_no"],
+		order_by="page_no asc, name asc",
+	)
+	if for_update:
+		details = [frappe.db.get_value(
+			"Scanned Document Detail", detail.name, "*", as_dict=True, for_update=True,
+		) for detail in details]
+		details = [d for d in details if d and not d.is_deleted and d.scanner_document == scanned_document]
+	return details, [file_to_data_url(d.attachment) for d in details]
 
 
 @frappe.whitelist()
@@ -27,10 +42,13 @@ def get_layout_labels(layout):
 
 
 @frappe.whitelist()
-def classify_scanned_document(scanned_document):
+def classify_scanned_document(scanned_document: str) -> dict:
 	"""Classify every page of a Scanned Document into its layout's sections,
 	writing title / page_type / layout_type back onto each Scanned Document Detail.
 	"""
+	reviewed = frappe.db.get_value("Scanned Document", scanned_document, "ai_reviewed", for_update=True)
+	if reviewed:
+		frappe.throw(_("This scan has been reviewed and is protected from AI changes."))
 	sd = frappe.get_doc("Scanned Document", scanned_document)
 	if not sd.scanner_layout:
 		frappe.throw(_("This scan has no layout assigned."))
@@ -43,16 +61,10 @@ def classify_scanned_document(scanned_document):
 	lt_by_label = {s["title"]: s["layout_type"] for s in sections}
 	default_lt = sections[0]["layout_type"] or "Single Page"
 
-	details = frappe.get_all(
-		"Scanned Document Detail",
-		filters={"scanner_document": scanned_document, "is_deleted": 0},
-		fields=["name", "attachment", "page_no"],
-		order_by="page_no asc",
-	)
+	details, image_urls = load_classification_pages(scanned_document)
 	if not details:
 		frappe.throw(_("No pages to classify."))
 
-	image_urls = [file_to_data_url(d["attachment"]) for d in details]
 	res = page_classifier.classify(labels, image_urls)
 	pages = res["pages"]
 

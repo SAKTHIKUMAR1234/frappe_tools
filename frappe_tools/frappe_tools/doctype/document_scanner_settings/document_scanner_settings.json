@@ -6,7 +6,12 @@
  "engine": "InnoDB",
  "field_order": [
   "applicable_doctypes",
-  "stun_and_turn_servers"
+  "stun_and_turn_servers",
+  "ai_categorization_section",
+  "enable_ai_categorization",
+  "ai_confidence_threshold",
+  "ai_batch_limit",
+  "ai_process_since"
  ],
  "fields": [
   {
@@ -21,13 +26,42 @@
    "fieldtype": "Table",
    "label": "STUN and TURN Servers",
    "options": "Document Scanner Server Setting"
+  },
+  {
+   "fieldname": "ai_categorization_section",
+   "fieldtype": "Section Break",
+   "label": "AI Categorization"
+  },
+  {
+   "fieldname": "enable_ai_categorization",
+   "fieldtype": "Check",
+   "label": "Enable AI Categorization",
+   "default": "0"
+  },
+  {
+   "fieldname": "ai_confidence_threshold",
+   "fieldtype": "Float",
+   "label": "AI Confidence Threshold",
+   "default": "0.8"
+  },
+  {
+   "fieldname": "ai_batch_limit",
+   "fieldtype": "Int",
+   "label": "AI Batch Limit",
+   "default": "200"
+  },
+  {
+   "fieldname": "ai_process_since",
+   "fieldtype": "Date",
+   "label": "AI Process Since",
+   "description": "Only scans created on or after this date. Blank includes all unchecked scans."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-01-08 15:28:03.907346",
+ "modified": "2026-10-12 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Scanner Settings",
