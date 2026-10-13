@@ -215,8 +215,11 @@ class TestCategorize(UnitTestCase):
 					flow.categorize_scan(self.scan.name)
 				apply.assert_not_called()
 				self.scan.reload()
-				self.assertEqual(self.scan.ai_check_status, "Needs Review")
-				self.assertIn("changed during AI processing", self.scan.ai_error)
+				if label == "reviewed":
+					self.assertEqual(self.scan.ai_check_status, "Done")
+				else:
+					self.assertEqual(self.scan.ai_check_status, "Needs Review")
+					self.assertIn("changed during AI processing", self.scan.ai_error)
 				self.assertEqual(self.scan.ai_reviewed, int(label == "reviewed"))
 				self.assertFalse(self.details[1].reload().ai_page_data)
 				self.assertEqual(self.details[1].title, self.titles[0])

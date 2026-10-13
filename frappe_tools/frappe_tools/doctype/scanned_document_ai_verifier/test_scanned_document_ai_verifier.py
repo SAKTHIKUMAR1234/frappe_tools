@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import json
+from datetime import datetime
 from io import BytesIO
 from unittest.mock import Mock, call, patch
 
@@ -17,6 +18,7 @@ from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
 
 class TestScannedDocumentAIVerifier(UnitTestCase):
 	def setUp(self):
+		self.enterContext(patch.object(verifier, "now_datetime", return_value=datetime(2026, 10, 13, 12)))
 		self.doc = frappe._dict(
 			doctype=verifier.DOCTYPE,
 			name="local-test-verifier",
@@ -53,8 +55,12 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 				frappe._dict(fieldname="qty", label="Quantity", fieldtype="Float"),
 			]
 		)
-		self.db = self.enterContext(patch.object(verifier.frappe, "db"))
-		self.db.exists.return_value = False
+		self.db = Mock()
+		for method in ("set_value", "commit", "rollback"):
+			self.enterContext(patch.object(frappe.db, method, getattr(self.db, method)))
+		self.lineage = self.enterContext(
+			patch.object(verifier, "has_scan_reference_doctype", return_value=False)
+		)
 		self.enterContext(
 			patch.object(
 				verifier.frappe, "session", frappe._dict(user="local-test@example.com")
@@ -218,7 +224,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.enqueue.assert_not_called()
 
 	def test_scan_lookup_includes_and_deduplicates_lineage(self):
-		self.db.exists.return_value = True
+		self.lineage.return_value = True
 		self.get_all.side_effect = [["SCAN-1"], ["SCAN-1", "SCAN-REFERENCED"]]
 		self.assertEqual(
 			verifier._scan_names("Purchase Invoice", "PI-1"),

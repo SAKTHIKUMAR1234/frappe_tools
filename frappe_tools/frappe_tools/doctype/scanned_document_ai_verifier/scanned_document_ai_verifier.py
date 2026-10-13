@@ -239,9 +239,14 @@ def _document_row(verifier, name, columns):
 			),
 		)["data"]
 		row.update(_response_values(response, columns[4:]))
-	except Exception as exc:  # noqa: BLE001 -- isolate failed documents and continue the batch
+	except Exception as exc:  # Isolate failed documents and continue the batch.
 		row.update(status="Failed", remarks=str(exc)[:4000])
 	return row
+
+
+def has_scan_reference_doctype() -> bool:
+	"""Check whether optional scan lineage is installed on this site."""
+	return bool(frappe.db.exists("DocType", "Scanned Document Reference"))
 
 
 def _scan_names(doctype, name):
@@ -252,7 +257,7 @@ def _scan_names(doctype, name):
 		order_by="creation asc",
 	)
 	# Lineage is installed separately on some version-16 sites.
-	if frappe.db.exists("DocType", "Scanned Document Reference"):
+	if has_scan_reference_doctype():
 		scans.extend(
 			frappe.get_all(
 				"Scanned Document Reference",
