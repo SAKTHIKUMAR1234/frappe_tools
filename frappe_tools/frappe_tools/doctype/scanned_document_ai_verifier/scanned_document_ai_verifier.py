@@ -120,7 +120,7 @@ def process_verifier(name: str, user: str) -> None:
 	try:
 		doc.check_permission("write")
 		frappe.has_permission(doc.reference_doctype, "read", throw=True)
-		_update(doc, status="Running", started_on=now_datetime())
+		_update(doc, status="Running", started_on=now_datetime(), last_run_id=frappe.generate_hash(length=12))
 		_publish_progress(doc)
 		frappe.db.commit()
 		rows, columns = _run_batch(doc)
@@ -153,7 +153,14 @@ def _run_batch(doc):
 		limit=cint(doc.max_documents),
 		order_by="creation asc",
 	)
-	columns = decide_columns(doc.reference_doctype, doc.prompt)
+	try:
+		columns = decide_columns(
+			doc.reference_doctype, doc.prompt, reference_name=doc.name, run_id=doc.last_run_id,
+		)
+	except Exception:
+		# Keep the call logs when transport or column validation fails.
+		frappe.db.commit()
+		raise
 	_update(doc, total_documents=len(names), columns=frappe.as_json(columns))
 	_publish_progress(doc)
 	frappe.db.commit()
@@ -171,12 +178,17 @@ def _run_batch(doc):
 	return rows, columns
 
 
-def decide_columns(reference_doctype: str, prompt: str) -> list[dict[str, str]]:
+def decide_columns(
+	reference_doctype: str, prompt: str, *, reference_name: str | None = None,
+	run_id: str | None = None,
+) -> list[dict[str, str]]:
 	response = call_vision(
 		[],
 		'Choose report columns. Return only {"columns": [{"key": "snake_case", "label": "Label"}]}. '
 		"Use unique keys. Do not include Document, Scanned Document(s), Status or Remarks columns.",
 		frappe.as_json({"prompt": prompt, "fields": _field_labels(reference_doctype)}),
+		target_doctype=reference_doctype, phase="Verifier Columns",
+		reference_doctype=DOCTYPE, reference_name=reference_name, run_id=run_id,
 	)["data"]
 	columns = [dict(column) for column in FIXED_COLUMNS]
 	seen = {column["key"] for column in columns}
@@ -237,6 +249,8 @@ def _document_row(verifier, name, columns):
 					"document": _trim_document(doc.as_dict(), doc.doctype),
 				}
 			),
+			target_doctype=verifier.reference_doctype, phase="Verifier Row",
+			reference_doctype=DOCTYPE, reference_name=verifier.name, run_id=verifier.last_run_id,
 		)["data"]
 		row.update(_response_values(response, columns[4:]))
 	except Exception as exc:  # Isolate failed documents and continue the batch.

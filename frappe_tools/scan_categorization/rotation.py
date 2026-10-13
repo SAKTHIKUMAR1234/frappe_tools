@@ -36,8 +36,8 @@ def image_extension(data_url: str) -> str:
 	return ".jpg" if mime == "data:image/jpeg" else ".png"
 
 
-def correct_image(data_url: str, clockwise: int) -> bytes | None:
-	"""Return corrected bytes in the original format, or None when unchanged."""
+def correct_image(data_url: str, clockwise: int) -> tuple[bytes | None, float]:
+	"""Return corrected bytes (None when unchanged) and the applied deskew angle."""
 	extension = image_extension(data_url)
 	if clockwise not in (0, 90, 180, 270):
 		raise ValueError("Rotation must be 0, 90, 180 or 270")
@@ -66,9 +66,9 @@ def correct_image(data_url: str, clockwise: int) -> bytes | None:
 			flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255),
 		)
 	if not clockwise and not deskew:
-		return None
+		return None, 0.0
 	params = [cv2.IMWRITE_JPEG_QUALITY, 92] if extension == ".jpg" else []
 	ok, encoded = cv2.imencode(extension, image, params)
 	if not ok:
 		raise ValueError("Cannot encode corrected page image")
-	return encoded.tobytes()
+	return encoded.tobytes(), angle if deskew else 0.0

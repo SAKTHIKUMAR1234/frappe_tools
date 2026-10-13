@@ -21,8 +21,11 @@ class TestJev(UnitTestCase):
 	def test_request_and_answer(self):
 		response = Mock(status_code=200)
 		response.json.return_value = {"answers": {"layout": self.answer}, "usage": {"input_tokens": 42, "cost": 0.001}}
+		context = {"phase": "Layout Decision", "reference_doctype": "Scanned Document",
+			"reference_name": "LOCAL-SCAN", "run_id": "local-run-id"}
 		with patch.object(jev.requests, "post", return_value=response) as post:
-			self.assertEqual(jev.decide({"bill_no": "LOCAL-42"}, self.questions, "Purchase Invoice"), {"layout": self.answer})
+			self.assertEqual(jev.decide({"bill_no": "LOCAL-42"}, self.questions, "Purchase Invoice", **context), {"layout": self.answer})
+		self.assertEqual(self.log.call_args.kwargs, context)
 		body = post.call_args.kwargs["json"]
 		self.assertEqual(body, {"model": jev.MODEL, "state": {"bill_no": "LOCAL-42"}, "questions": self.questions})
 		self.assertEqual(post.call_args.args, (jev.URL,))

@@ -220,6 +220,10 @@ class TestCategorize(UnitTestCase):
 				else:
 					self.assertEqual(self.scan.ai_check_status, "Needs Review")
 					self.assertIn("changed during AI processing", self.scan.ai_error)
+				_log, outcome = self.outcome()
+				self.assertEqual(outcome["status"], self.scan.ai_check_status)
+				self.assertFalse(outcome["applied"])
+				self.assertIn("changed during AI processing", outcome["reason"])
 				self.assertEqual(self.scan.ai_reviewed, int(label == "reviewed"))
 				self.assertFalse(self.details[1].reload().ai_page_data)
 				self.assertEqual(self.details[1].title, self.titles[0])
@@ -310,6 +314,10 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(len(files), 1)
 		self.assertFalse(frappe.db.exists("File", files[0].name))
 		self.assertFalse(Path(files[0].get_full_path()).exists())
+		_log, outcome = self.outcome()
+		self.assertEqual(outcome["status"], "Failed")
+		self.assertFalse(outcome["applied"])
+		self.assertTrue(all(page["corrected_file"] is None and page["deskew_angle"] == 0 for page in outcome["pages"]))
 		self.assertEqual(get_page_data(self.scan.name), self.vision_mock.return_value["data"]["pages"])
 		self.vision_mock.assert_called_once()
 
@@ -556,3 +564,170 @@ class TestCategorize(UnitTestCase):
 		execute()
 		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_confidence_threshold"), 0)
 		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_batch_limit"), 10)
+
+	def outcome(self):
+		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={
+			"reference_doctype": flow.SCAN, "reference_name": self.scan.name,
+			"phase": "Categorization Outcome",
+		}, fields=["name", "run_id", "provider", "model", "response_payload"])
+		self.assertEqual(len(logs), 1)
+		log = logs[0]
+		self.assertEqual(log.provider, "frappe_tools")
+		self.assertFalse(log.model)
+		self.assertEqual(len(log.run_id), 12)
+		return log, json.loads(log.response_payload)
+
+	def test_all_phases_share_reference_and_run_id(self):
+		self.vision.stop()
+		settings = frappe._dict(model="local/test-vision", max_attempts=1, get_api_key=lambda: "local-test-key")
+		def response(url, **kwargs):
+			if url == jev.URL:
+				return self.response(url, **kwargs)
+			result = Mock(status_code=200)
+			result.json.return_value = {"choices": [{"message": {
+				"content": json.dumps(self.vision_mock.return_value["data"]),
+			}}]}
+			return result
+
+		from frappe_tools.scan_categorization import jev
+
+		self.post.side_effect = response
+		with patch.object(llm, "ensure_ready", return_value=settings):
+			flow.categorize_scan(self.scan.name)
+		log, outcome = self.outcome()
+		self.assertEqual(outcome["status"], "Done")
+		self.assertTrue(outcome["applied"])
+		self.assertEqual(outcome["threshold"], 0.8)
+		self.assertEqual(outcome["layout"], self.layout.name)
+		self.assertEqual(outcome["layout_confidence"], 0.95)
+		self.assertIsNone(outcome["layout_probabilities"])
+		self.assertEqual(outcome["reason"], "")
+		for index, (page, detail) in enumerate(zip(outcome["pages"], self.details, strict=True)):
+			original = detail.attachment
+			detail.reload()
+			self.assertEqual(page, {
+				"detail": detail.name, "page_no": index + 1, "section": self.titles[index],
+				"section_confidence": 0.9, "rotation": 90 if index == 0 else 0,
+				"deskew_angle": 0.0, "corrected_file": detail.attachment if index == 0 else None,
+				"original_attachment": original,
+			})
+		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={"run_id": log.run_id},
+			fields=["phase", "reference_doctype", "reference_name"])
+		self.assertCountEqual([row.phase for row in logs], [
+			"Page Extraction", "Layout Decision", "Section Decision", "Categorization Outcome",
+		])
+		for row in logs:
+			self.assertEqual((row.reference_doctype, row.reference_name), (flow.SCAN, self.scan.name))
+
+	def test_review_outcome_preserves_proposals_without_corrections(self):
+		self.confidence = 0.7
+		flow.categorize_scan(self.scan.name)
+		log, outcome = self.outcome()
+		self.assertEqual(outcome["status"], "Needs Review")
+		self.assertFalse(outcome["applied"])
+		self.assertEqual(outcome["threshold"], 0.8)
+		self.assertEqual(outcome["layout"], self.layout.name)
+		self.assertEqual(outcome["layout_confidence"], 0.95)
+		self.assertIn("below threshold", outcome["reason"])
+		self.assertEqual(self.vision_mock.call_args.kwargs["run_id"], log.run_id)
+		for index, page in enumerate(outcome["pages"]):
+			self.assertEqual(page["section"], self.titles[index])
+			self.assertEqual(page["section_confidence"], 0.7)
+			self.assertIsNone(page["corrected_file"])
+			self.assertEqual(page["deskew_angle"], 0.0)
+
+	def test_failed_outcome_is_logged_once(self):
+		self.post.side_effect = RuntimeError("Local provider failure")
+		with patch.object(frappe, "log_error"):
+			flow.categorize_scan(self.scan.name)
+		_log, outcome = self.outcome()
+		self.assertEqual(outcome["status"], "Failed")
+		self.assertFalse(outcome["applied"])
+		self.assertEqual(outcome["reason"], "Local provider failure")
+		self.assertEqual(len(outcome["pages"]), 2)
+
+	def test_verifier_persists_phase_logs_with_run_id(self):
+		self.vision.stop()
+		from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
+			scanned_document_ai_verifier as verifier,
+		)
+
+		doc = frappe.get_doc({
+			"doctype": verifier.DOCTYPE, "reference_doctype": "Purchase Invoice",
+			"filters_data": json.dumps([["name", "=", self.bill.name]]),
+			"prompt": "Compare total quantity with the scanned quantity.", "max_documents": 1,
+		}).insert()
+		self.vision.stop()
+		settings = frappe._dict(model="local/test-verifier", max_attempts=1, get_api_key=lambda: "local-test-key")
+		responses = []
+		for data in ({"columns": [{"key": "quantity", "label": "Quantity"}]},
+			{"values": {"quantity": 5}, "remarks": "Matches"}):
+			response = Mock(status_code=200)
+			response.json.return_value = {"choices": [{"message": {"content": json.dumps(data)}}]}
+			responses.append(response)
+		self.post.side_effect = responses
+		with patch.object(llm, "ensure_ready", return_value=settings), patch.object(frappe, "enqueue"):
+			verifier.run_verifier(doc.name)
+			verifier.process_verifier(doc.name, "Administrator")
+		doc.reload()
+		self.assertEqual(doc.status, "Completed", doc.error_log)
+		self.assertEqual(doc.processed_documents, 1)
+		self.assertEqual(doc.failed_documents, 0)
+		self.assertEqual(len(doc.last_run_id), 12)
+		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={
+			"reference_doctype": verifier.DOCTYPE, "reference_name": doc.name,
+		}, fields=["phase", "run_id", "request_payload"])
+		self.assertCountEqual([log.phase for log in logs], ["Verifier Columns", "Verifier Row"])
+		for log in logs:
+			self.assertEqual(log.run_id, doc.last_run_id)
+			if log.phase == "Verifier Row":
+				payload = json.loads(log.request_payload)
+				evidence = json.loads(payload["messages"][1]["content"][0]["text"])
+				self.assertEqual(evidence["document"]["name"], self.bill.name)
+				self.assertEqual(evidence["document"]["total_qty"], 5)
+		from io import BytesIO
+
+		from openpyxl import load_workbook
+
+		file = frappe.get_doc("File", {"file_url": doc.result_file})
+		self.assertTrue(file.is_private)
+		workbook = load_workbook(BytesIO(file.get_content()))
+		self.addCleanup(workbook.close)
+		self.assertEqual(list(workbook.active.values)[1][-1], 5)
+
+	def test_vision_legacy_call_and_retry_metadata(self):
+		import requests
+
+		self.vision.stop()
+		settings = frappe._dict(model="local/test-compatibility", max_attempts=2, get_api_key=lambda: "local-test-key")
+		response = Mock(status_code=200)
+		response.json.return_value = {"choices": [{"message": {"content": '{"quantity": 5}'}}]}
+		context = {"phase": "Page Extraction", "reference_doctype": flow.SCAN,
+			"reference_name": self.scan.name, "run_id": frappe.generate_hash(length=12)}
+		self.post.side_effect = [response, requests.Timeout("Local timeout"), response]
+		with patch.object(llm, "ensure_ready", return_value=settings), patch.object(llm.time, "sleep"):
+			self.assertEqual(llm.call_vision([], "Read", "Quantity")["data"], {"quantity": 5})
+			self.assertEqual(llm.call_vision([], "Read", "Quantity", **context)["data"], {"quantity": 5})
+		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={"model": settings.model},
+			fields=["phase", "reference_doctype", "reference_name", "run_id", "status"], order_by="creation asc")
+		self.assertEqual(len(logs), 3)
+		self.assertTrue(all(not logs[0][key] for key in context))
+		self.assertEqual([row.status for row in logs], ["Success", "Timeout", "Success"])
+		for row in logs[1:]:
+			self.assertEqual({key: row[key] for key in context}, context)
+
+	def test_outcome_records_probabilities_and_applied_deskew(self):
+		probabilities = {self.layout.name: 0.95}
+		def response(*args, **kwargs):
+			result = self.response(*args, **kwargs)
+			if "layout" in result.json.return_value["answers"]:
+				result.json.return_value["answers"]["layout"]["probabilities"] = probabilities
+			return result
+
+		self.post.side_effect = response
+		with patch("frappe_tools.scan_categorization.rotation.detect_skew", return_value=2.5):
+			flow.categorize_scan(self.scan.name)
+		_log, outcome = self.outcome()
+		self.assertEqual(outcome["layout_probabilities"], probabilities)
+		self.assertEqual(outcome["status"], "Done")
+		self.assertTrue(all(page["deskew_angle"] == 2.5 and page["corrected_file"] for page in outcome["pages"]))

@@ -3,7 +3,14 @@
 
 frappe.ui.form.on("Scanned Document", {
 	async refresh(frm) {
-		if (frm.is_new() || frm.doc.ai_reviewed) return;
+		if (frm.is_new()) return;
+		frm.add_custom_button(__("AI History"), () => {
+			frappe.set_route("List", "Document AI Call Log", {
+				reference_doctype: frm.doctype,
+				reference_name: frm.doc.name,
+			});
+		}, __("AI"));
+		if (frm.doc.ai_reviewed) return;
 		const method = "frappe_tools.scan_categorization.categorize.";
 		const { message: allowed } = await frappe.call({
 			method: method + "can_check",
@@ -21,7 +28,7 @@ frappe.ui.form.on("Scanned Document", {
 				});
 				frappe.show_alert(message.queued ? __("AI check queued") : __("No scan queued"));
 				await frm.reload_doc();
-			});
+			}, __("AI"));
 		}
 		frm.add_custom_button(__("Mark reviewed"), async () => {
 			if (frm.is_dirty()) await frm.save();
@@ -31,6 +38,6 @@ frappe.ui.form.on("Scanned Document", {
 				freeze: true,
 			});
 			await frm.reload_doc();
-		});
+		}, __("AI"));
 	},
 });

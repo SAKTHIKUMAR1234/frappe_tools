@@ -290,7 +290,16 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			verifier, "decide_columns", return_value=self.columns
 		) as decide:
 			verifier.process_verifier(self.doc.name, "local-test@example.com")
-		decide.assert_called_once_with("Purchase Invoice", self.doc.prompt)
+		decide.assert_called_once_with(
+			"Purchase Invoice", self.doc.prompt, reference_name=self.doc.name, run_id=self.doc.last_run_id,
+		)
+		self.assertEqual(len(self.doc.last_run_id), 12)
+		for entry in self.vision.call_args_list:
+			self.assertEqual(entry.kwargs, {
+				"target_doctype": "Purchase Invoice", "phase": "Verifier Row",
+				"reference_doctype": verifier.DOCTYPE, "reference_name": self.doc.name,
+				"run_id": self.doc.last_run_id,
+			})
 		self.get_list.assert_called_once_with(
 			"Purchase Invoice",
 			filters=json.loads(self.doc.filters_data),
@@ -441,6 +450,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.assertEqual(self.doc.error_log, "test traceback")
 		self.assertIsNotNone(self.doc.finished_on)
 		self.db.rollback.assert_called_once()
+		self.assertEqual(self.db.commit.call_count, 3)
 		self.log_error.assert_called_once()
 		self.assertEqual(self.publish.call_args.args[1]["status"], "Failed")
 		self.save_file.assert_not_called()

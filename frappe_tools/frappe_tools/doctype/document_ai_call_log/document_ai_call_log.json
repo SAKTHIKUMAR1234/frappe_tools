@@ -7,6 +7,10 @@
  "field_order": [
   "extraction",
   "target_doctype",
+  "phase",
+  "reference_doctype",
+  "reference_name",
+  "run_id",
   "model",
   "provider",
   "status",
@@ -38,6 +42,38 @@
    "fieldtype": "Link",
    "label": "Target DocType",
    "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "phase",
+   "fieldtype": "Select",
+   "label": "Phase",
+   "options": "\nPage Extraction\nLayout Decision\nSection Decision\nCategorization Outcome\nVerifier Columns\nVerifier Row",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Name",
+   "options": "reference_doctype",
+   "read_only": 1
+  },
+  {
+   "fieldname": "run_id",
+   "fieldtype": "Data",
+   "label": "Run ID",
+   "search_index": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "read_only": 1
   },
   {
