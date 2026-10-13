@@ -18,7 +18,9 @@ frappe.ui.form.on("Scanned Document", {
 			args: { name: frm.doc.name },
 		});
 		if (!allowed || frm.doc.ai_reviewed) return;
-		if (frm.doc.ai_check_status !== "Queued") {
+		if (frm.doc.ai_check_status !== "Queued" || frappe.datetime.get_hour_diff(
+			frappe.datetime.now_datetime(), frm.doc.modified
+		) >= 6) {
 			frm.add_custom_button(__("Run AI check"), async () => {
 				if (frm.is_dirty()) await frm.save();
 				const { message } = await frappe.call({

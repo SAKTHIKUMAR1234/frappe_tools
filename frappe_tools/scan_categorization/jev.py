@@ -54,47 +54,47 @@ def decide(
 	phase: str | None = None, reference_doctype: str | None = None,
 	reference_name: str | None = None, run_id: str | None = None,
 ) -> dict:
-	"""Return validated choice answers and log every HTTP attempt."""
+	"""Request decisions, validate choices, and log the attempt."""
 	body = {"model": MODEL, "state": _bounded_state(state, questions), "questions": questions}
-	settings = llm.ensure_ready()
-	started = time.monotonic()
-	status, http_status, error = "Success", None, None
-	result, usage = {}, {}
+	attempt = dict(started=time.monotonic(), status="Success", http_status=None, result={}, error=None)
 	try:
-		response = requests.post(
-			URL,
-			headers={"Authorization": f"Bearer {settings.get_api_key()}"},
-			json=body,
-			timeout=60,
-		)
-		http_status = response.status_code
-		response.raise_for_status()
-		result = response.json()
-		usage = result.get("usage") or {}
-		answers = result.get("answers") or {}
-		for key, question in questions.items():
-			answer = answers.get(key) or {}
-			confidence = answer.get("confidence")
-			if (
-				answer.get("type") != "choice"
-				or answer.get("choice") not in question["criteria"]
-				or isinstance(confidence, bool)
-				or not isinstance(confidence, (float, int))
-				or not math.isfinite(confidence)
-				or not 0 <= confidence <= 1
-			):
-				raise ValueError(f"Invalid Jev answer for {key}")
-		return {key: answers[key] for key in questions}
-	except Exception as exc:
-		status = "Timeout" if isinstance(exc, requests.Timeout) else "Error"
-		error = str(exc)
+		_request(body, attempt)
+		return _validate_answers(attempt["result"].get("answers") or {}, questions)
+	except (requests.RequestException, ValueError, TypeError, KeyError, RuntimeError) as exc:
+		attempt.update(status="Timeout" if isinstance(exc, requests.Timeout) else "Error", error=str(exc))
 		raise
 	finally:
-		tokens = usage.get("input_tokens", 0)
-		llm._log_call(
-			None, target_doctype, MODEL, status, http_status,
-			int((time.monotonic() - started) * 1000),
-			{"prompt_tokens": tokens, "total_tokens": tokens, "cost": usage.get("cost", 0)},
-			body, result, error,
-			phase=phase, reference_doctype=reference_doctype, reference_name=reference_name, run_id=run_id,
-		)
+		_log_attempt(body, attempt, target_doctype, dict(phase=phase,
+			reference_doctype=reference_doctype, reference_name=reference_name, run_id=run_id))
+
+
+def _request(body, attempt):
+	settings = llm.ensure_ready()
+	response = requests.post(URL, headers={"Authorization": f"Bearer {settings.get_api_key()}"},
+		json=body, timeout=60)
+	attempt["http_status"] = response.status_code
+	response.raise_for_status()
+	attempt["result"] = response.json()
+	if not isinstance(attempt["result"], dict):
+		raise ValueError("Decision response must be an object")
+
+
+def _validate_answers(answers, questions):
+	for key, question in questions.items():
+		answer = answers.get(key) or {}
+		confidence = answer.get("confidence")
+		if answer.get("type") != "choice" or answer.get("choice") not in question["criteria"]:
+			raise ValueError(f"Invalid Jev answer for {key}")
+		if type(confidence) not in (float, int) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+			raise ValueError(f"Invalid Jev answer for {key}")
+	return {key: answers[key] for key in questions}
+
+
+def _log_attempt(body, attempt, target_doctype, context):
+	result = attempt["result"]
+	usage = (result.get("usage") or {}) if isinstance(result, dict) else {}
+	tokens = usage.get("input_tokens", 0)
+	llm.log_call(None, target_doctype, MODEL, attempt["status"], attempt["http_status"],
+		int((time.monotonic() - attempt["started"]) * 1000),
+		{"prompt_tokens": tokens, "total_tokens": tokens, "cost": usage.get("cost", 0)},
+		body, result, attempt["error"], **context)

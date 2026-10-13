@@ -14,7 +14,7 @@ class TestJev(UnitTestCase):
 		self.settings = patch.object(jev.llm, "ensure_ready", return_value=Mock(get_api_key=lambda: "test-key"))
 		self.settings.start()
 		self.addCleanup(self.settings.stop)
-		self.logger = patch.object(jev.llm, "_log_call")
+		self.logger = patch.object(jev.llm, "log_call")
 		self.log = self.logger.start()
 		self.addCleanup(self.logger.stop)
 

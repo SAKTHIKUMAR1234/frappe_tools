@@ -118,10 +118,12 @@ after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
 # Permissions evaluated in scripted ways
 
 permission_query_conditions = {
+	"Document AI Call Log": "frappe_tools.frappe_tools.doctype.document_ai_call_log.document_ai_call_log.permission_query_conditions",
 	"*": "frappe_tools.permissions.ai_bot_query_conditions",
 }
 
 has_permission = {
+	"Document AI Call Log": "frappe_tools.frappe_tools.doctype.document_ai_call_log.document_ai_call_log.has_permission",
 	"*": "frappe_tools.permissions.ai_bot_has_permission",
 }
 
@@ -242,7 +244,7 @@ has_permission = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
-ignore_links_on_delete = ['Scanned Document Detail']
+ignore_links_on_delete = ['Scanned Document Detail', 'Document AI Call Log']
 app_include_js = ["tools_plugin.bundle.js"]
 
 doc_events = {
