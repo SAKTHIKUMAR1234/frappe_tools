@@ -12,7 +12,9 @@
   "ai_confidence_threshold",
   "ai_batch_limit",
   "ai_process_since",
-  "ai_max_pages"
+  "ai_max_pages",
+  "enable_page_extraction",
+  "page_extraction_batch_limit"
  ],
  "fields": [
   {
@@ -62,13 +64,27 @@
    "fieldtype": "Int",
    "label": "AI Max Pages",
    "default": "30"
+  },
+  {
+   "fieldname": "enable_page_extraction",
+   "fieldtype": "Check",
+   "label": "Enable Page Extraction",
+   "default": "0",
+   "description": "Read new scanned pages every hour and store their data."
+  },
+  {
+   "fieldname": "page_extraction_batch_limit",
+   "fieldtype": "Int",
+   "label": "Page Extraction Batch Limit",
+   "default": "500",
+   "description": "Maximum pages to read each hour."
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-12 12:00:00.000000",
+ "modified": "2026-10-13 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Scanner Settings",

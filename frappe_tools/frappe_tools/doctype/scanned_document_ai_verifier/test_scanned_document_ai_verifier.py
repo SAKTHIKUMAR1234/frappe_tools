@@ -108,14 +108,10 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		)
 		self.log_error = self.enterContext(patch.object(verifier.frappe, "log_error"))
 		self.vision = self.enterContext(patch.object(verifier, "call_vision"))
-		self.loader = self.enterContext(
-			patch.object(verifier, "load_scanned_document_details")
-		)
-		self.compress = self.enterContext(
-			patch.object(
-				verifier, "compress_image", return_value="data:image/jpeg;base64,test"
-			)
-		)
+		self.page_counts = {}
+		self.enterContext(patch.object(frappe.db, "count",
+			side_effect=lambda doctype, filters: self.page_counts.get(filters["scanner_document"], 1)))
+		self.loader = self.enterContext(patch.object(verifier, "get_page_data", side_effect=self.stored_pages))
 		self.xlsx = self.enterContext(
 			patch.object(
 				verifier, "make_xlsx", return_value=BytesIO(b"local-test-xlsx")
@@ -134,6 +130,10 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			{"key": "difference", "label": "Difference"},
 		]
 		self.columns = verifier.FIXED_COLUMNS + self.value_columns
+
+	def stored_pages(self, scan, limit):
+		return [{"page_no": number, "section": "Invoice", "document_number": f"{scan}-{number}"}
+			for number in range(1, limit + 1)]
 
 	def _get_meta(self, doctype):
 		return self.child_meta if doctype == "Purchase Invoice Item" else self.meta
@@ -274,12 +274,12 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.doc.status = "Queued"
 		self.get_list.return_value = ["PI-OK", "PI-NONE", "PI-FAIL", "PI-AFTER"]
 		self.get_all.side_effect = [["SCAN-1", "SCAN-2"], [], ["SCAN-BAD"], ["SCAN-3"]]
-		self.loader.side_effect = [
-			{"attachments": [{"attachment": "/private/files/page1.jpg"}]},
-			{"attachments": [{"attachment": "https://local.invalid/signed-page2.jpg"}]},
-			RuntimeError("Page unavailable"),
-			{"attachments": [{"attachment": "/private/files/page3.jpg"}]},
-		]
+		def pages(scan, limit):
+			if scan == "SCAN-BAD":
+				raise RuntimeError("Page unavailable")
+			return self.stored_pages(scan, limit)
+
+		self.loader.side_effect = pages
 		self.vision.side_effect = [
 			{
 				"data": {
@@ -337,9 +337,14 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			df="result_file",
 		)
 		self.assertEqual(self.vision.call_count, 2)
-		images, _, prompt = self.vision.call_args_list[0].args
-		self.assertEqual(len(images), 2)
+		images, system_prompt, prompt = self.vision.call_args_list[0].args
+		self.assertEqual(images, [])
+		self.assertIn("only from the page data JSON", system_prompt)
 		payload = json.loads(prompt)
+		self.assertEqual(payload["pages"], [
+			{"scanned_document": "SCAN-1", "page_no": 1, "section": "Invoice", "document_number": "SCAN-1-1"},
+			{"scanned_document": "SCAN-2", "page_no": 1, "section": "Invoice", "document_number": "SCAN-2-1"},
+		])
 		self.assertEqual(payload["columns"], self.value_columns)
 		self.assertEqual(
 			payload["document"],
@@ -350,7 +355,6 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 				"items": [{"qty": 12}],
 			},
 		)
-		self.compress.assert_any_call("https://local.invalid/signed-page2.jpg")
 		progress = [entry.args[1] for entry in self.publish.call_args_list]
 		self.assertEqual(
 			[event["processed_documents"] for event in progress], [0, 0, 1, 2, 3, 4, 4]
@@ -373,9 +377,6 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 
 	def test_vision_error_is_a_failed_row(self):
 		self.get_all.return_value = ["SCAN-1"]
-		self.loader.return_value = {
-			"attachments": [{"attachment": "/private/files/page.jpg"}]
-		}
 		self.vision.side_effect = RuntimeError("Provider unavailable")
 		row = verifier._document_row(self.doc, "PI-FAIL", self.columns)
 		self.assertEqual(row["status"], "Failed")
@@ -394,9 +395,6 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 
 	def test_invalid_vision_values_are_isolated(self):
 		self.get_all.return_value = ["SCAN-1"]
-		self.loader.return_value = {
-			"attachments": [{"attachment": "/private/files/page.jpg"}]
-		}
 		self.vision.return_value = {"data": {"values": {"scan_weight": {"weight": 10}}}}
 		row = verifier._document_row(self.doc, "PI-BAD", self.columns)
 		self.assertEqual(row["status"], "Failed")
@@ -497,13 +495,13 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.assertFalse(self.checkpoints)
 
 	def test_verifier_omits_pages_after_twenty(self):
-		self.get_all.return_value = ["SCAN-1", "SCAN-2"]
-		self.loader.return_value = {"attachments": [{"attachment": f"local-{i}.png"} for i in range(12)]}
+		self.get_all.return_value = ["SCAN-1", "SCAN-2", "SCAN-3"]
+		self.page_counts.update({"SCAN-1": 12, "SCAN-2": 12, "SCAN-3": 3})
 		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": "Matches"}}
 		row = verifier._document_row(self.doc, "PI-1", self.columns)
-		self.assertEqual(len(self.vision.call_args.args[0]), 20)
-		self.assertEqual(self.compress.call_count, 20)
-		self.assertIn("4 pages omitted", row["remarks"])
+		self.assertEqual(len(json.loads(self.vision.call_args.args[2])["pages"]), 20)
+		self.assertEqual(self.loader.call_args_list, [call("SCAN-1", limit=12), call("SCAN-2", limit=8)])
+		self.assertIn("7 pages omitted", row["remarks"])
 
 	def test_lost_permission_at_job_start_fails_the_run(self):
 		self.has_permission.side_effect = frappe.PermissionError("Read denied")
@@ -516,7 +514,6 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 	def test_timeout_mid_batch_fails_run_and_keeps_partial_excel(self):
 		self.get_list.return_value = ["PI-1", "PI-2", "PI-3"]
 		self.get_all.return_value = ["SCAN-1"]
-		self.loader.return_value = {"attachments": [{"attachment": "/private/files/page.jpg"}]}
 		self.vision.side_effect = [
 			{"data": {"values": {"scan_weight": 10, "total_qty": 12, "difference": 2}, "remarks": ""}},
 			verifier.JobTimeoutException("job timed out"),

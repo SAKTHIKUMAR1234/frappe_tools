@@ -71,10 +71,11 @@ class TestJev(UnitTestCase):
 			jev.decide(state, self.questions, "Purchase Invoice")
 		self.assertEqual(post.call_args.kwargs["json"]["state"], state)
 
-	def test_small_state_preserves_all_page_data(self):
+	def test_small_state_preserves_all_summary_page_data(self):
 		from frappe_tools.scan_categorization.test_categorize import page_data
 
-		state = {"document": {"bill_no": "LOCAL-42"}, "pages": [page_data(1)]}
+		page = {key: value for key, value in page_data(1).items() if key not in jev.RAW_FIELDS}
+		state = {"document": {"bill_no": "LOCAL-42"}, "pages": [page]}
 		self.assertEqual(jev._bounded_state(state, self.questions), state)
 
 	def test_size_guard_order_and_preserved_fields(self):
@@ -138,3 +139,13 @@ class TestJev(UnitTestCase):
 			jev.decide(state, self.questions, "Purchase Invoice")
 		self.assertEqual(len(post.call_args.kwargs["json"]["state"]["pages"][0]["items"]), 15)
 		self.assertEqual(len(state["pages"][0]["items"]), 40)
+
+	def test_raw_page_fields_are_always_dropped_from_state(self):
+		from frappe_tools.scan_categorization.test_categorize import page_data
+
+		pages = [page_data(1)]
+		result = jev._bounded_state({"pages": pages}, self.questions)["pages"][0]
+		for field in ("full_text", "handwritten", "item_table"):
+			self.assertNotIn(field, result)
+			self.assertIn(field, pages[0])
+		self.assertEqual(result["items"], pages[0]["items"])

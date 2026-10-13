@@ -1,6 +1,5 @@
 """Confidence-gated scan categorization with guarded, recoverable runs."""
 
-import base64
 import json
 import math
 from pathlib import Path
@@ -15,10 +14,11 @@ from frappe_tools.api.doc_classify import _layout_sections, load_classification_
 from frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail import attach_files
 from frappe_tools.scan_categorization import jev
 from frappe_tools.scan_categorization.page_data import (
-	get_cached_or_extracted_pages,
+	has_unread_pages,
 	lock_page_snapshot,
 	page_data_values,
-	save_page_data,
+	queue_scan_pages,
+	stored_pages,
 )
 from frappe_tools.scan_categorization.rotation import correct_image, image_extension
 from frappe_tools.utils import llm, save_file_always_new
@@ -111,7 +111,15 @@ def run_ai_check(name: str) -> dict:
 	settings, _threshold = _settings()
 	if not settings.enable_ai_categorization:
 		frappe.throw(_("Enable AI Categorization in Document Scanner Settings first."))
+	if has_unread_pages(name):
+		frappe.throw(_("Some pages are not read yet. Click Read pages now and try again later."))
 	return {"queued": _queue_scan(name, manual=True)}
+
+
+@frappe.whitelist(methods=["POST"])
+def read_pages_now(name: str) -> dict:
+	check_scan_permission(frappe.get_doc(SCAN, name))
+	return {"queued": queue_scan_pages(name, retry_failed=True)}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -179,10 +187,12 @@ def _can_queue(scan, manual):
 	if not scan or scan.ai_reviewed:
 		return False
 	if scan.ai_check_status == "Queued":
-		return _recoverable(scan)
-	if scan.ai_check_status and not manual:
+		if not _recoverable(scan):
+			return False
+	elif scan.ai_check_status and not manual:
 		return False
-	return bool(frappe.db.exists(DETAIL, {"scanner_document": scan.name, "is_deleted": 0}))
+	active = frappe.db.exists(DETAIL, {"scanner_document": scan.name, "is_deleted": 0})
+	return bool(active) and not has_unread_pages(scan.name)
 
 
 def _owns_run(scan, run_id):
@@ -227,8 +237,11 @@ def _compute(scan, outcome, directory):
 	details, images = load_classification_pages(scan.name)
 	if not details:
 		raise ValueError("No active pages to categorize")
+	pages = stored_pages(details)
+	if pages is None:
+		outcome.update(status="", reason="Some pages are not read yet.")
+		return None
 	layouts = _layouts(scan._doctype)
-	pages = get_cached_or_extracted_pages(scan, details, images, run_id=scan.ai_run_id)
 	_record_pages(outcome, details, pages)
 	sections, answers = _decisions(scan, layouts, pages, outcome)
 	result = frappe._dict(details=details, images=images, pages=pages, corrections={})
@@ -326,7 +339,6 @@ def _apply_result(scan, result, outcome):
 	if reason:
 		outcome.update(reason=reason, status="Needs Review")
 		return True
-	save_page_data(result.details, result.images, result.pages)
 	if result.apply:
 		_apply(scan, result, outcome)
 		outcome.update(status="Done", applied=True)
@@ -352,7 +364,7 @@ def _apply(scan, result, outcome):
 
 
 def _save_correction(scan, result, index, created, outcome):
-	detail, image, page = result.details[index], result.images[index], result.pages[index]
+	detail, page = result.details[index], result.pages[index]
 	path, angle = result.corrections[detail.name]
 	content = path.read_bytes()
 	file = save_file_always_new(f"{scan.name}-{detail.name}-corrected{path.suffix}",
@@ -360,8 +372,7 @@ def _save_correction(scan, result, index, created, outcome):
 	created.append(file)
 	values = dict(attachment=file.file_url, original_attachment=detail.original_attachment or detail.attachment)
 	attach_files(frappe._dict(name=detail.name, **values))
-	corrected_url = image.split(",", 1)[0] + "," + base64.b64encode(content).decode()
-	values.update(page_data_values({**page, "rotation": 0}, file.file_url, corrected_url))
+	values.update(page_data_values({**page, "rotation": 0}, file.file_url))
 	outcome["pages"][index].update(deskew_angle=angle, corrected_file=file.file_url)
 	return values
 
