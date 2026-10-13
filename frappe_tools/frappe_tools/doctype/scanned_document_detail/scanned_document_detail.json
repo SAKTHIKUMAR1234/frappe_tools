@@ -12,7 +12,9 @@
   "is_deleted",
   "page_type",
   "title",
-  "original_attachment"
+  "original_attachment",
+  "ai_page_data",
+  "ai_page_data_on"
  ],
  "fields": [
   {
@@ -67,6 +69,18 @@
    "fieldname": "original_attachment",
    "fieldtype": "Attach",
    "label": "Original Attachment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ai_page_data",
+   "fieldtype": "JSON",
+   "label": "AI Page Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ai_page_data_on",
+   "fieldtype": "Datetime",
+   "label": "AI Page Data On",
    "read_only": 1
   }
  ],
