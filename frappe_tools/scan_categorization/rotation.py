@@ -1,14 +1,20 @@
 """Quarter turns and conservative line-based deskew of page images."""
 
+from __future__ import annotations
+
 import base64
 import math
+from typing import TYPE_CHECKING
 
-import cv2
-import numpy as np
+if TYPE_CHECKING:
+	import numpy as np
 
 
 def detect_skew(image: np.ndarray) -> float:
 	"""Return the dominant horizontal line angle in image coordinates."""
+	import cv2
+	import numpy as np
+
 	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 	scale = min(1, 1600 / max(gray.shape))
 	if scale < 1:
@@ -38,6 +44,9 @@ def image_extension(data_url: str) -> str:
 
 def correct_image(data_url: str, clockwise: int) -> tuple[bytes | None, float]:
 	"""Return corrected bytes (None when unchanged) and the applied deskew angle."""
+	import cv2
+	import numpy as np
+
 	extension = image_extension(data_url)
 	if clockwise not in (0, 90, 180, 270):
 		raise ValueError("Rotation must be 0, 90, 180 or 270")

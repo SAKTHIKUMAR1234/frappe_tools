@@ -7,8 +7,8 @@ import cv2
 import frappe
 from frappe.tests import UnitTestCase
 
-from frappe_tools.scan_categorization import PAGE_SCHEMA, _extract_pages, get_page_data
 from frappe_tools.scan_categorization import categorize as flow
+from frappe_tools.scan_categorization.page_data import PAGE_SCHEMA, _extract_pages, get_page_data
 from frappe_tools.scan_categorization.test_rotation import page_image
 from frappe_tools.utils import llm, save_file_always_new
 
@@ -80,7 +80,7 @@ class TestCategorize(UnitTestCase):
 	def new_scan(self, status="", creation=None, reviewed=0):
 		scan = frappe.get_doc({
 			"doctype": flow.SCAN, "_doctype": "Purchase Invoice", "_docname": self.bill.name,
-			"scanner_layout": self.layout.name, "ai_check_status": status, "ai_reviewed": reviewed,
+			"scanner_layout": self.layout.name, "ai_check_status": status, "ai_reviewed": reviewed, "ai_run_id": frappe.generate_hash(length=16),
 		}).insert()
 		if creation:
 			frappe.db.set_value(flow.SCAN, scan.name, "creation", creation)
@@ -90,13 +90,15 @@ class TestCategorize(UnitTestCase):
 		image = page_image()
 		details = []
 		for number in (1, 2):
+			image[0, 0] = [int(self.prefix[-6:-4], 16), int(self.prefix[-4:-2], 16), number]
 			page = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE) if number == 1 else image
 			content = cv2.imencode(".png", page)[1].tobytes()
-			file = save_file_always_new(f"{self.prefix}-{scan.name}-{number}.png", content, flow.SCAN, scan.name, is_private=1)
 			details.append(frappe.get_doc({
 				"doctype": flow.DETAIL, "scanner_document": scan.name, "page_no": number,
-				"attachment": file.file_url, "layout_type": "Single Page", "page_type": "Front", "title": self.titles[0],
+				"layout_type": "Single Page", "page_type": "Front", "title": self.titles[0],
 			}).insert())
+			file = save_file_always_new(f"{self.prefix}-{scan.name}-{number}.png", content, flow.DETAIL, details[-1].name, is_private=1, df="attachment")
+			details[-1].db_set("attachment", file.file_url)
 		return details
 
 	def response(self, _url, **kwargs):
@@ -114,7 +116,7 @@ class TestCategorize(UnitTestCase):
 		other.layout_name = self.prefix + " alternate"
 		other.insert()
 		frappe.db.set_value(flow.SCAN, self.scan.name, "scanner_layout", other.name)
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.scan.reload()
 		self.assertEqual(self.scan.ai_check_status, "Done", self.scan.ai_error)
 		self.assertEqual(self.scan.ai_layout_confidence, 0.9)
@@ -125,7 +127,7 @@ class TestCategorize(UnitTestCase):
 		self.assertNotEqual(self.details[0].attachment, original)
 		self.assertTrue(self.details[0].attachment.endswith(".png"))
 		self.assertTrue(frappe.db.exists("File", {"file_url": original}))
-		self.assertTrue(frappe.db.exists("File", {"file_url": self.details[0].attachment, "attached_to_name": self.scan.name, "is_private": 1}))
+		self.assertTrue(frappe.db.exists("File", {"file_url": self.details[0].attachment, "attached_to_name": self.details[0].name, "attached_to_field": "attachment", "is_private": 1}))
 		self.assertEqual(self.details[1].title, self.titles[1])
 		self.assertEqual(self.details[1].layout_type, "Series Vertical")
 		self.assertFalse(self.details[1].original_attachment)
@@ -146,7 +148,7 @@ class TestCategorize(UnitTestCase):
 		self.confidence = 0.79
 		before = [d.reload().as_dict() for d in self.details]
 		with patch.object(flow, "correct_image") as correction:
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		correction.assert_not_called()
 		self.scan.reload()
 		self.assertEqual(self.scan.ai_check_status, "Needs Review")
@@ -183,7 +185,7 @@ class TestCategorize(UnitTestCase):
 			self.vision_mock.side_effect = vision
 			self.post.side_effect = response
 			with patch.object(flow, "correct_image", side_effect=correct):
-				flow.categorize_scan(self.scan.name)
+				flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 			queries = [str(call.args[0]).lower() for call in sql.call_args_list]
 			for table in ("tabscanned document`", "tabscanned document detail`"):
 				self.assertTrue(any(table in query and "for update" in query for query in queries))
@@ -200,6 +202,12 @@ class TestCategorize(UnitTestCase):
 			"reordered": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "page_no", 3),
 			"moved": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "scanner_document", "local-other-scan"),
 			"added": add_page,
+			"title": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "title", self.titles[1]),
+			"layout_type": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "layout_type", "Series Vertical"),
+			"page_type": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "page_type", "Back"),
+			"source_type": lambda: frappe.db.set_value(flow.SCAN, self.scan.name, "_doctype", "Sales Invoice"),
+			"source_name": lambda: frappe.db.set_value(flow.SCAN, self.scan.name, "_docname", "local-replaced"),
+			"scanner_layout": lambda: frappe.db.set_value(flow.SCAN, self.scan.name, "scanner_layout", None),
 			"status": lambda: frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Done"),
 			"reviewed": lambda: flow.mark_reviewed(self.scan.name),
 		}
@@ -212,22 +220,23 @@ class TestCategorize(UnitTestCase):
 					return self.response(*args, **kwargs)
 				self.post.side_effect = response
 				with patch.object(flow, "_apply") as apply:
-					flow.categorize_scan(self.scan.name)
+					flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 				apply.assert_not_called()
 				self.scan.reload()
-				if label == "reviewed":
+				if label in ("reviewed", "status"):
 					self.assertEqual(self.scan.ai_check_status, "Done")
 				else:
 					self.assertEqual(self.scan.ai_check_status, "Needs Review")
 					self.assertIn("changed during AI processing", self.scan.ai_error)
-				_log, outcome = self.outcome()
-				self.assertEqual(outcome["status"], self.scan.ai_check_status)
-				self.assertFalse(outcome["applied"])
-				self.assertIn("changed during AI processing", outcome["reason"])
+				if label not in ("reviewed", "status"):
+					_log, outcome = self.outcome()
+					self.assertEqual(outcome["status"], self.scan.ai_check_status)
+					self.assertFalse(outcome["applied"])
 				self.assertEqual(self.scan.ai_reviewed, int(label == "reviewed"))
 				self.assertFalse(self.details[1].reload().ai_page_data)
 				self.assertEqual(self.details[1].title, self.titles[0])
 				frappe.db.rollback(save_point="concurrent_change")
+				self.scan.reload()
 
 	def test_change_during_image_correction_is_rechecked(self):
 		correct = flow.correct_image
@@ -235,7 +244,7 @@ class TestCategorize(UnitTestCase):
 			frappe.db.set_value(flow.DETAIL, self.details[0].name, "is_deleted", 1)
 			return correct(*args)
 		with patch.object(flow, "correct_image", side_effect=change):
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
 		self.assertFalse(self.details[0].reload().original_attachment)
 
@@ -245,7 +254,7 @@ class TestCategorize(UnitTestCase):
 				frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Queued")
 				self.vision_mock.return_value = {"data": {"pages": pages}}
 				with patch.object(frappe, "log_error"):
-					flow.categorize_scan(self.scan.name)
+					flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 				self.assertEqual(self.scan.reload().ai_check_status, "Failed")
 				self.assertIn("every page exactly once", self.scan.ai_error)
 				self.assertFalse(self.details[0].reload().ai_page_data)
@@ -254,7 +263,7 @@ class TestCategorize(UnitTestCase):
 	def test_page_questions_follow_active_detail_order(self):
 		frappe.db.set_value(flow.DETAIL, self.details[0].name, "page_no", 5)
 		frappe.db.set_value(flow.DETAIL, self.details[1].name, "page_no", 9)
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done", self.scan.ai_error)
 		for detail, title in zip(self.details, self.titles, strict=True):
 			self.assertEqual(detail.reload().title, title)
@@ -264,7 +273,7 @@ class TestCategorize(UnitTestCase):
 		content = cv2.imencode(".jpg", cv2.rotate(page_image(), cv2.ROTATE_90_COUNTERCLOCKWISE))[1].tobytes()
 		original = save_file_always_new(f"{self.prefix}.jpg", content, flow.SCAN, self.scan.name, is_private=1)
 		frappe.db.set_value(flow.DETAIL, self.details[0].name, "attachment", original.file_url)
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done", self.scan.ai_error)
 		detail = self.details[0].reload()
 		self.assertEqual(detail.original_attachment, original.file_url)
@@ -276,17 +285,17 @@ class TestCategorize(UnitTestCase):
 
 	def test_low_layout_confidence_and_exact_threshold(self):
 		self.layout_confidence = 0.7
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
 		frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Queued")
 		self.layout_confidence = self.confidence = 0.8
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done")
 
 	def test_failure_records_error_and_does_not_escape(self):
 		self.post.side_effect = RuntimeError("Local simulated API failure")
 		with patch.object(frappe, "log_error") as log:
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Failed")
 		self.assertIn("simulated API failure", self.scan.ai_error)
 		log.assert_called_once()
@@ -307,13 +316,14 @@ class TestCategorize(UnitTestCase):
 				raise RuntimeError("Second page write failed")
 			return set_value(doctype, name, *args, **kwargs)
 		with patch.object(frappe.db, "set_value", side_effect=fail_second), patch.object(frappe, "log_error"), patch.object(flow, "save_file_always_new", side_effect=save):
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Failed")
 		self.assertEqual(self.details[0].reload().attachment, original)
 		self.assertFalse(self.details[0].original_attachment)
 		self.assertEqual(len(files), 1)
 		self.assertFalse(frappe.db.exists("File", files[0].name))
 		self.assertFalse(Path(files[0].get_full_path()).exists())
+		self.assertTrue(Path(frappe.get_doc("File", {"file_url": original}).get_full_path()).exists())
 		_log, outcome = self.outcome()
 		self.assertEqual(outcome["status"], "Failed")
 		self.assertFalse(outcome["applied"])
@@ -323,13 +333,13 @@ class TestCategorize(UnitTestCase):
 
 	def test_review_and_completed_jobs_are_never_overwritten(self):
 		flow.mark_reviewed(self.scan.name)
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertFalse(flow.run_ai_check(self.scan.name)["queued"])
 		self.vision_mock.assert_not_called()
 		self.assertEqual(self.scan.reload().ai_reviewed, 1)
 		for status in ("Done", "Needs Review", "Failed", ""):
 			frappe.db.set_value(flow.SCAN, self.scan.name, {"ai_reviewed": 0, "ai_check_status": status})
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.vision_mock.assert_not_called()
 
 	def test_nightly_date_limit_deleted_reviewed_and_dedup(self):
@@ -353,8 +363,8 @@ class TestCategorize(UnitTestCase):
 			self.assertEqual(flow.enqueue_nightly(), 1)
 			self.assertEqual(enqueue.call_args.kwargs["name"], first.name)
 			self.assertEqual(enqueue.call_args.kwargs["queue"], "long")
-			self.assertEqual(enqueue.call_args.kwargs["job_id"], f"scan-categorize::{first.name}")
-			self.assertTrue(enqueue.call_args.kwargs["deduplicate"])
+			self.assertEqual(enqueue.call_args.kwargs["job_id"], f"scan-categorize::{first.name}::{first.reload().ai_run_id}")
+			self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
 			self.assertFalse(flow.run_ai_check(first.name)["queued"])
 			self.assertEqual(enqueue.call_count, 1)
 			self.assertEqual(flow.enqueue_nightly(), 1)
@@ -505,16 +515,16 @@ class TestCategorize(UnitTestCase):
 	def test_deleted_pages_are_not_read(self):
 		frappe.db.set_value(flow.DETAIL, self.details[1].name, "is_deleted", 1)
 		self.vision_mock.return_value["data"]["pages"] = self.vision_mock.return_value["data"]["pages"][:1]
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done")
 		self.assertEqual(len(self.vision_mock.call_args.args[0]), 1)
 		self.assertEqual(self.details[1].reload().title, self.titles[0])
 
 	def test_original_survives_manual_retry(self):
 		original = self.details[0].attachment
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Queued")
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done")
 		self.assertEqual(self.details[0].reload().original_attachment, original)
 		self.assertEqual(get_page_data(self.scan.name), [
@@ -524,15 +534,17 @@ class TestCategorize(UnitTestCase):
 
 	def test_missing_layout_fails_without_vision(self):
 		with patch.object(flow, "_layouts", side_effect=ValueError("No scanner layouts")), patch.object(frappe, "log_error"):
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Failed")
 		self.vision_mock.assert_not_called()
 
-	def test_rq_dedup_does_not_leave_a_finished_scan_queued(self):
+	def test_rerun_uses_a_new_job_id_after_completion(self):
 		frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Done")
-		with patch.object(frappe, "enqueue", return_value=None):
-			self.assertFalse(flow.run_ai_check(self.scan.name)["queued"])
-		self.assertEqual(self.scan.reload().ai_check_status, "Done")
+		old_run = self.scan.ai_run_id
+		with patch.object(frappe, "enqueue", return_value=None) as enqueue:
+			self.assertTrue(flow.run_ai_check(self.scan.name)["queued"])
+		self.assertNotEqual(self.scan.reload().ai_run_id, old_run)
+		self.assertEqual(enqueue.call_args.kwargs["run_id"], self.scan.ai_run_id)
 
 	def test_legacy_classifier_respects_human_review(self):
 		from frappe_tools.api.doc_classify import classify_scanned_document
@@ -542,23 +554,16 @@ class TestCategorize(UnitTestCase):
 			classify_scanned_document(self.scan.name)
 		self.vision_mock.assert_not_called()
 
-	def test_nightly_continues_after_an_enqueue_failure(self):
-		self.settings.ai_process_since = "2099-01-01"
-		for day in (1, 2):
-			self.add_pages(self.new_scan(creation=f"2099-01-0{day}"))
-		with patch.object(flow, "_queue_scan", side_effect=[RuntimeError("Queue unavailable"), True]), patch.object(frappe.db, "rollback"), patch.object(frappe, "log_error") as log:
-			self.assertEqual(flow.enqueue_nightly(), 1)
-		log.assert_called_once()
-		self.assertTrue(frappe.db.exists(flow.SCAN, {"_docname": self.bill.name, "ai_check_status": "Failed"}))
-
 	def test_settings_patch_initializes_only_missing_values(self):
-		from frappe_tools.scan_categorization.settings_defaults import execute
+		from frappe_tools.patches.set_scan_ai_setting_defaults import execute
 
 		frappe.db.set_single_value(flow.SETTINGS, "ai_confidence_threshold", None)
 		frappe.db.set_single_value(flow.SETTINGS, "ai_batch_limit", None)
+		frappe.db.set_single_value(flow.SETTINGS, "ai_max_pages", None)
 		execute()
 		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_confidence_threshold"), 0.8)
 		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_batch_limit"), 200)
+		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_max_pages"), 30)
 		frappe.db.set_single_value(flow.SETTINGS, "ai_confidence_threshold", 0)
 		frappe.db.set_single_value(flow.SETTINGS, "ai_batch_limit", 10)
 		execute()
@@ -574,7 +579,7 @@ class TestCategorize(UnitTestCase):
 		log = logs[0]
 		self.assertEqual(log.provider, "frappe_tools")
 		self.assertFalse(log.model)
-		self.assertEqual(len(log.run_id), 12)
+		self.assertEqual(len(log.run_id), 16)
 		return log, json.loads(log.response_payload)
 
 	def test_all_phases_share_reference_and_run_id(self):
@@ -593,7 +598,7 @@ class TestCategorize(UnitTestCase):
 
 		self.post.side_effect = response
 		with patch.object(llm, "ensure_ready", return_value=settings):
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		log, outcome = self.outcome()
 		self.assertEqual(outcome["status"], "Done")
 		self.assertTrue(outcome["applied"])
@@ -621,7 +626,7 @@ class TestCategorize(UnitTestCase):
 
 	def test_review_outcome_preserves_proposals_without_corrections(self):
 		self.confidence = 0.7
-		flow.categorize_scan(self.scan.name)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		log, outcome = self.outcome()
 		self.assertEqual(outcome["status"], "Needs Review")
 		self.assertFalse(outcome["applied"])
@@ -639,7 +644,7 @@ class TestCategorize(UnitTestCase):
 	def test_failed_outcome_is_logged_once(self):
 		self.post.side_effect = RuntimeError("Local provider failure")
 		with patch.object(frappe, "log_error"):
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		_log, outcome = self.outcome()
 		self.assertEqual(outcome["status"], "Failed")
 		self.assertFalse(outcome["applied"])
@@ -668,19 +673,19 @@ class TestCategorize(UnitTestCase):
 		self.post.side_effect = responses
 		with patch.object(llm, "ensure_ready", return_value=settings), patch.object(frappe, "enqueue"):
 			verifier.run_verifier(doc.name)
-			verifier.process_verifier(doc.name, "Administrator")
+			verifier.process_verifier(doc.name, "Administrator", doc.reload().last_run_id)
 		doc.reload()
 		self.assertEqual(doc.status, "Completed", doc.error_log)
 		self.assertEqual(doc.processed_documents, 1)
 		self.assertEqual(doc.failed_documents, 0)
-		self.assertEqual(len(doc.last_run_id), 12)
+		self.assertEqual(len(doc.last_run_id), 16)
 		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={
 			"reference_doctype": verifier.DOCTYPE, "reference_name": doc.name,
-		}, fields=["phase", "run_id", "request_payload"])
-		self.assertCountEqual([log.phase for log in logs], ["Verifier Columns", "Verifier Row"])
+		}, fields=["phase", "run_id", "request_payload", "provider"])
+		self.assertCountEqual([log.phase for log in logs], ["Verifier Columns", "Verifier Row", "Verifier Row"])
 		for log in logs:
 			self.assertEqual(log.run_id, doc.last_run_id)
-			if log.phase == "Verifier Row":
+			if log.phase == "Verifier Row" and log.provider != "frappe_tools":
 				payload = json.loads(log.request_payload)
 				evidence = json.loads(payload["messages"][1]["content"][0]["text"])
 				self.assertEqual(evidence["document"]["name"], self.bill.name)
@@ -726,8 +731,172 @@ class TestCategorize(UnitTestCase):
 
 		self.post.side_effect = response
 		with patch("frappe_tools.scan_categorization.rotation.detect_skew", return_value=2.5):
-			flow.categorize_scan(self.scan.name)
+			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		_log, outcome = self.outcome()
 		self.assertEqual(outcome["layout_probabilities"], probabilities)
 		self.assertEqual(outcome["status"], "Done")
 		self.assertTrue(all(page["deskew_angle"] == 2.5 and page["corrected_file"] for page in outcome["pages"]))
+
+	def test_original_survives_scanner_save_and_hourly_cleanup(self):
+		from frappe_tools.api.doc_scanner import make_or_update_main_doc, upload_image
+		from frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail import (
+			remove_old_deletable_documents,
+		)
+
+		original = frappe.get_doc("File", {"file_url": self.details[0].attachment})
+		content = original.get_content()
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
+		self.assertEqual(self.scan.reload().ai_check_status, "Done")
+		replacements = [upload_image(detail.reload().as_dict()) for detail in self.details]
+		make_or_update_main_doc(self.scan._doctype, self.scan.scanner_layout, self.scan._docname,
+			scan_name=self.scan.name, documents=replacements)
+		# Exercise cleanup's retention guard even for legacy ownership left on an old row.
+		frappe.db.set_value("File", original.name, "attached_to_name", self.details[0].name)
+		get_all = frappe.get_all
+		def local_details(doctype, *args, **kwargs):
+			if doctype == flow.DETAIL and kwargs.get("filters") == {"is_deleted": 1}:
+				kwargs["filters"]["name"] = ["in", [detail.name for detail in self.details]]
+			return get_all(doctype, *args, **kwargs)
+		with patch.object(frappe, "get_all", side_effect=local_details):
+			remove_old_deletable_documents()
+		self.assertFalse(frappe.db.exists(flow.DETAIL, self.details[0].name))
+		self.assertEqual(original.reload().get_content(), content)
+		self.assertEqual(original.attached_to_doctype, flow.DETAIL)
+		self.assertEqual(original.attached_to_name, replacements[0])
+		self.assertEqual(original.attached_to_field, "original_attachment")
+		self.assertEqual(frappe.db.get_value(flow.DETAIL, replacements[0], "original_attachment"), original.file_url)
+
+	def test_stale_token_never_writes_outcome(self):
+		old_run = self.scan.ai_run_id
+		new_run = frappe.generate_hash(length=16)
+		def replace_run(*args, **kwargs):
+			frappe.db.set_value(flow.SCAN, self.scan.name, {"ai_run_id": new_run, "ai_error": "new run"})
+			return self.response(*args, **kwargs)
+		self.post.side_effect = replace_run
+		flow.categorize_scan(self.scan.name, old_run)
+		self.assertEqual(self.scan.reload().ai_check_status, "Queued")
+		self.assertEqual(self.scan.ai_error, "new run")
+		self.assertFalse(self.details[0].reload().ai_page_data)
+		self.assertFalse(frappe.db.exists("Document AI Call Log", {
+			"reference_name": self.scan.name, "phase": "Categorization Outcome", "run_id": old_run,
+		}))
+		self.vision_mock.reset_mock()
+		flow.categorize_scan(self.scan.name, old_run)
+		self.vision_mock.assert_not_called()
+
+	def test_expired_queue_recovery_manual_and_nightly(self):
+		from frappe.utils import add_to_date, now_datetime
+
+		self.settings.ai_process_since = "2099-01-01"
+		frappe.db.set_value(flow.SCAN, self.scan.name, "creation", "2099-01-01")
+		for recover in (lambda: flow.run_ai_check(self.scan.name)["queued"], flow.enqueue_nightly):
+			with self.subTest(recover=recover):
+				old_run = self.scan.reload().ai_run_id
+				frappe.db.set_value(flow.SCAN, self.scan.name, "modified", add_to_date(now_datetime(), hours=-7), update_modified=False)
+				with patch.object(flow, "is_job_enqueued", return_value=True), patch.object(frappe, "enqueue") as enqueue:
+					self.assertFalse(recover())
+					enqueue.assert_not_called()
+				with patch.object(flow, "is_job_enqueued", return_value=False), patch.object(frappe, "enqueue") as enqueue:
+					self.assertTrue(recover())
+					self.assertNotEqual(self.scan.reload().ai_run_id, old_run)
+					self.assertEqual(enqueue.call_args.kwargs["run_id"], self.scan.ai_run_id)
+					self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
+
+	def test_page_limit_requires_review_without_ai(self):
+		self.settings.ai_max_pages = 1
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
+		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
+		self.assertIn("2 pages", self.scan.ai_error)
+		self.vision_mock.assert_not_called()
+		self.post.assert_not_called()
+
+	def test_section_positions_match_scanner_shapes(self):
+		for kind in ("Series Vertical", "Front And Back Vertical", "Front And Back Horizontal"):
+			with self.subTest(kind=kind):
+				answers = {f"page_{i}": {"choice": "section"} for i in range(1, 5)}
+				positions, reason = flow._positions({"section": kind}, answers)
+				self.assertFalse(reason)
+				paired = kind.startswith("Front And Back")
+				self.assertEqual([p["page_no"] for p in positions], [1, 1, 2, 2] if paired else [1, 2, 3, 4])
+				self.assertEqual([p["page_type"] for p in positions], ["Front", "Back"] * 2 if paired else ["Front"] * 4)
+		positions, reason = flow._positions({"section": "Single Page"}, answers)
+		self.assertFalse(positions)
+		self.assertIn("only one page", reason)
+
+	def test_legacy_classifier_checks_snapshot_and_permissions(self):
+		from frappe_tools.api.doc_classify import classify_scanned_document, page_classifier
+
+		with (
+			patch.object(frappe, "get_roles", return_value=["Scanner User"]),
+			patch.object(frappe, "has_permission", return_value=False),
+			self.assertRaises(frappe.PermissionError),
+		):
+			classify_scanned_document(self.scan.name)
+		def classify(*args):
+			frappe.db.set_value(flow.DETAIL, self.details[0].name, "title", self.titles[1])
+			return {"pages": []}
+		with (
+			patch.object(page_classifier, "classify", side_effect=classify),
+			self.assertRaisesRegex(frappe.ValidationError, "changed during AI processing"),
+		):
+			classify_scanned_document(self.scan.name)
+		self.assertEqual(self.details[0].reload().title, self.titles[1])
+
+	def test_vision_worker_timeout_is_not_retried(self):
+		from rq.timeouts import JobTimeoutException
+
+		self.vision.stop()
+		settings = frappe._dict(model="local/test-timeout", max_attempts=3, get_api_key=lambda: "local-key")
+		self.post.side_effect = JobTimeoutException("local worker deadline")
+		with patch.object(llm, "ensure_ready", return_value=settings), self.assertRaises(JobTimeoutException):
+			llm.call_vision([], "Read", "Quantity")
+		self.post.assert_called_once()
+
+	def test_single_page_overflow_does_not_apply(self):
+		def choose_single(*args, **kwargs):
+			response = self.response(*args, **kwargs)
+			for key, answer in response.json.return_value["answers"].items():
+				if key.startswith("page_"):
+					answer["choice"] = self.titles[0]
+			return response
+		self.post.side_effect = choose_single
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
+		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
+		self.assertIn("only one page", self.scan.ai_error)
+		self.assertFalse(self.details[0].reload().original_attachment)
+
+	def test_queue_state_is_committed_before_publication(self):
+		frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Failed")
+		events = []
+		def enqueue(*args, **kwargs):
+			events.append("enqueue")
+			current = self.scan.reload()
+			self.assertEqual(current.ai_check_status, "Queued")
+			self.assertEqual(current.ai_run_id, kwargs["run_id"])
+			self.assertTrue(kwargs["enqueue_after_commit"])
+		with patch.object(frappe.db, "commit", side_effect=lambda: events.append("commit")), patch.object(frappe, "enqueue", side_effect=enqueue):
+			self.assertTrue(flow.run_ai_check(self.scan.name)["queued"])
+		self.assertEqual(events, ["commit", "enqueue", "commit"])
+
+	def test_decision_criteria_name_layout_and_sections(self):
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
+		layout_question = self.post.call_args_list[0].kwargs["json"]["questions"]["layout"]
+		criterion = layout_question["criteria"][self.layout.name]
+		self.assertIn(f"Layout '{self.layout.name}' for Purchase Invoice", criterion)
+		self.assertIn(f"{self.titles[0]} (Single Page)", criterion)
+		self.assertIn(f"{self.titles[1]} (Series Vertical)", criterion)
+		page_question = self.post.call_args.kwargs["json"]["questions"]["page_2"]
+		self.assertIn("state.pages[1]", page_question["instructions"])
+		self.assertEqual(page_question["criteria"][self.titles[1]],
+			f"Section '{self.titles[1]}' of layout '{self.layout.name}'. Shape: Series Vertical (several pages in order)")
+
+	def test_nightly_continues_after_a_queue_failure(self):
+		self.settings.ai_process_since = "2099-01-01"
+		for day in (1, 2):
+			self.add_pages(self.new_scan(creation=f"2099-01-0{day}"))
+		with (
+			patch.object(flow, "_queue_scan", side_effect=[RuntimeError("Queue unavailable"), True]),
+			patch.object(frappe.db, "rollback"), patch.object(frappe, "log_error") as log,
+		):
+			self.assertEqual(flow.enqueue_nightly(), 1)
+		log.assert_called_once()

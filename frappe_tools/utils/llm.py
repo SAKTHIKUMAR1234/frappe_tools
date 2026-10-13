@@ -14,6 +14,7 @@ import frappe
 import requests
 from frappe import _
 from frappe.utils import cint, flt
+from rq.timeouts import JobTimeoutException
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 SETTINGS_DOCTYPE = "Document Extraction Settings"
@@ -128,15 +129,14 @@ def _attempt_call(body, headers, timeout, model, extraction, target_doctype, **l
 			raise ValueError(_json_error(raw_text, finish_reason))
 	except requests.Timeout as exc:
 		status, error = "Timeout", str(exc)
-	except requests.HTTPError as exc:
-		status = "Error"
-		error = _extract_api_error(result) or str(exc)
+	except JobTimeoutException:
+		raise
 	except Exception as exc:
 		status = "Error"
 		error = _extract_api_error(result) or str(exc)
 
 	latency_ms = int((time.monotonic() - started) * 1000)
-	_log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text, finish_reason, **log_context)
+	log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text, finish_reason, **log_context)
 
 	if status == "Success" and parsed is not None:
 		return {"ok": True, "data": parsed, "usage": usage, "latency_ms": latency_ms}
@@ -161,36 +161,37 @@ def _extract_api_error(result):
 	return None
 
 
-def _log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text=None, finish_reason=None, *,
-	phase=None, reference_doctype=None, reference_name=None, run_id=None, provider="OpenRouter",
-):
-	"""Persist a Document AI Call Log row. Never raises into the caller."""
-	try:
-		log = frappe.new_doc(CALL_LOG_DOCTYPE)
-		log.extraction = extraction
-		log.target_doctype = target_doctype
-		log.model = model
-		log.provider = provider
-		log.phase = phase
-		log.reference_doctype = reference_doctype
-		log.reference_name = reference_name
-		log.run_id = run_id
-		log.status = status
-		log.http_status = http_status
-		log.latency_ms = latency_ms
-		log.prompt_tokens = cint((usage or {}).get("prompt_tokens"))
-		log.completion_tokens = cint((usage or {}).get("completion_tokens"))
-		log.total_tokens = cint((usage or {}).get("total_tokens"))
-		log.cost_usd = flt((usage or {}).get("cost"))
-		log.request_payload = frappe.as_json(_redact_images(body))
-		log.response_payload = frappe.as_json(result)[:140000]
-		log.raw_response = (raw_text or "")[:140000]
-		log.finish_reason = finish_reason
-		log.error_message = (error or "")[:500]
-		log.flags.ignore_permissions = True
-		log.insert(ignore_permissions=True)
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Document AI Call Log insert failed")
+def log_call(
+	extraction: str | None, target_doctype: str | None, model: str | None, status: str,
+	http_status: int | None, latency_ms: int, usage: dict | None, body: dict, result, error: str | None,
+	raw_text: str | None = None, finish_reason: str | None = None, *,
+	phase: str | None = None, reference_doctype: str | None = None, reference_name: str | None = None,
+	run_id: str | None = None, provider: str = "OpenRouter",
+) -> None:
+	"""Insert a Document AI Call Log row; insert errors propagate to the caller."""
+	log = frappe.new_doc(CALL_LOG_DOCTYPE)
+	log.extraction = extraction
+	log.target_doctype = target_doctype
+	log.model = model
+	log.provider = provider
+	log.phase = phase
+	log.reference_doctype = reference_doctype
+	log.reference_name = reference_name
+	log.run_id = run_id
+	log.status = status
+	log.http_status = http_status
+	log.latency_ms = latency_ms
+	log.prompt_tokens = cint((usage or {}).get("prompt_tokens"))
+	log.completion_tokens = cint((usage or {}).get("completion_tokens"))
+	log.total_tokens = cint((usage or {}).get("total_tokens"))
+	log.cost_usd = flt((usage or {}).get("cost"))
+	log.request_payload = frappe.as_json(_redact_images(body))
+	log.response_payload = frappe.as_json(result)
+	log.raw_response = (raw_text or "")[:140000]
+	log.finish_reason = finish_reason
+	log.error_message = (error or "")[:500]
+	log.flags.ignore_permissions = True
+	log.insert(ignore_permissions=True)
 
 
 def _redact_images(body):
@@ -223,7 +224,7 @@ def safe_json_loads(text):
 
 	try:
 		return json.loads(text)
-	except Exception:
+	except (ValueError, TypeError):
 		pass
 
 	# Fall back to the first balanced {...} or [...] block.
@@ -235,6 +236,6 @@ def safe_json_loads(text):
 			candidate = re.sub(r",\s*([}\]])", r"\1", candidate)  # drop trailing commas
 			try:
 				return json.loads(candidate)
-			except Exception:
+			except (ValueError, TypeError):
 				continue
 	return None

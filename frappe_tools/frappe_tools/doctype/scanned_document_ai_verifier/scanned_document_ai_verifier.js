@@ -26,7 +26,9 @@ frappe.ui.form.on("Scanned Document AI Verifier", {
 		}
 		if (active) frm.disable_save();
 		else frm.enable_save();
-		if (!active && frm.perm[0]?.write) {
+		// The server allows a rerun of an expired Queued or Running run.
+		const can_run = frm.is_new() || frm.doc.__onload?.can_run;
+		if (can_run && frm.perm[0]?.write) {
 			frm.add_custom_button(__("Run"), async () => {
 				if (frm.scan_verifier_starting) return;
 				frm.scan_verifier_starting = true;
@@ -42,6 +44,16 @@ frappe.ui.form.on("Scanned Document AI Verifier", {
 				} finally {
 					frm.scan_verifier_starting = false;
 				}
+			});
+		}
+		if (frm.doc.status === "Failed" && frm.doc.columns && frm.perm[0]?.write) {
+			frm.add_custom_button(__("Build Excel"), async () => {
+				await frappe.call({
+					method: "frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier.scanned_document_ai_verifier.build_excel",
+					args: { name: frm.doc.name },
+					freeze: true,
+				});
+				await frm.reload_doc();
 			});
 		}
 		if (frm.doc.result_file) {

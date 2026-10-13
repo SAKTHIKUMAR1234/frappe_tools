@@ -15,6 +15,8 @@ from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
 	scanned_document_ai_verifier as verifier,
 )
 
+READ_CHECKPOINTS = verifier._result_rows
+
 
 class TestScannedDocumentAIVerifier(UnitTestCase):
 	def setUp(self):
@@ -26,7 +28,9 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			prompt="Compare scanned weight in kg to total quantity and calculate the difference.",
 			filters_data='[["Purchase Invoice", "docstatus", "=", 1]]',
 			max_documents=200,
-			status="Draft",
+			status="Queued",
+			last_run_id="local-run-token1",
+			modified=datetime(2026, 10, 13, 12),
 			total_documents=0,
 			processed_documents=0,
 			failed_documents=0,
@@ -55,6 +59,10 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 				frappe._dict(fieldname="qty", label="Quantity", fieldtype="Float"),
 			]
 		)
+		self.checkpoints = []
+		self.enterContext(patch.object(verifier, "log_call", side_effect=lambda *a, **kw: self.checkpoints.append(a[8])))
+		self.enterContext(patch.object(verifier, "_result_rows", side_effect=lambda doc: self.checkpoints))
+		self.enterContext(patch.object(frappe.db, "get_value", side_effect=lambda *a, **kw: self.doc.copy()))
 		self.db = Mock()
 		for method in ("set_value", "commit", "rollback"):
 			self.enterContext(patch.object(frappe.db, method, getattr(self.db, method)))
@@ -189,10 +197,10 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 				)
 				kwargs = self.enqueue.call_args.kwargs
 				self.assertEqual(kwargs["user"], "local-test@example.com")
-				self.assertEqual(kwargs["job_id"], f"scan-ai-verifier::{self.doc.name}")
+				self.assertEqual(kwargs["job_id"], f"scan-ai-verifier::{self.doc.name}::{self.doc.last_run_id}")
 				self.assertEqual(kwargs["queue"], "long")
 				self.assertEqual(kwargs["timeout"], timeout)
-				self.assertTrue(kwargs["deduplicate"])
+				self.assertEqual(kwargs["run_id"], self.doc.last_run_id)
 				self.assertTrue(kwargs["enqueue_after_commit"])
 				self.assertIsNone(self.doc.result_file)
 		self.get_doc.assert_called_with(
@@ -289,11 +297,11 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		with patch.object(
 			verifier, "decide_columns", return_value=self.columns
 		) as decide:
-			verifier.process_verifier(self.doc.name, "local-test@example.com")
+			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
 		decide.assert_called_once_with(
 			"Purchase Invoice", self.doc.prompt, reference_name=self.doc.name, run_id=self.doc.last_run_id,
 		)
-		self.assertEqual(len(self.doc.last_run_id), 12)
+		self.assertEqual(self.doc.last_run_id, "local-run-token1")
 		for entry in self.vision.call_args_list:
 			self.assertEqual(entry.kwargs, {
 				"target_doctype": "Purchase Invoice", "phase": "Verifier Row",
@@ -358,7 +366,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 					"after_commit": True,
 				},
 			)
-		self.assertEqual(self.db.commit.call_count, 7)
+		self.assertEqual(self.db.commit.call_count, 12)
 		self.set_user.assert_has_calls(
 			[call("local-test@example.com"), call("local-test@example.com")]
 		)
@@ -428,7 +436,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 
 	def test_empty_batch_creates_header_only_excel(self):
 		with patch.object(verifier, "decide_columns", return_value=self.columns):
-			verifier.process_verifier(self.doc.name, "local-test@example.com")
+			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
 		self.xlsx.assert_called_once_with(
 			[[column["label"] for column in self.columns]], "Verification"
 		)
@@ -445,7 +453,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			),
 			self.assertRaisesRegex(RuntimeError, "Bad column response"),
 		):
-			verifier.process_verifier(self.doc.name, "local-test@example.com")
+			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
 		self.assertEqual(self.doc.status, "Failed")
 		self.assertEqual(self.doc.error_log, "test traceback")
 		self.assertIsNotNone(self.doc.finished_on)
@@ -454,3 +462,118 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.log_error.assert_called_once()
 		self.assertEqual(self.publish.call_args.args[1]["status"], "Failed")
 		self.save_file.assert_not_called()
+
+	def test_expired_active_run_can_be_requeued_with_new_token(self):
+		for status in verifier.ACTIVE_STATUSES:
+			self.doc.update(status=status, modified=datetime(2026, 10, 12), started_on=None)
+			old_run = self.doc.last_run_id
+			verifier.run_verifier(self.doc.name)
+			self.assertNotEqual(self.doc.last_run_id, old_run)
+			self.assertEqual(self.doc.status, "Queued")
+
+	def test_stale_job_exits_without_writes(self):
+		verifier.process_verifier(self.doc.name, "local-test@example.com", "old-token")
+		self.vision.assert_not_called()
+		self.db.set_value.assert_not_called()
+		self.save_file.assert_not_called()
+
+	def test_replaced_running_job_cannot_finish(self):
+		def replace(doc):
+			self.doc = frappe._dict(**doc)
+			self.doc.last_run_id = "new-token"
+		with patch.object(verifier, "_run_batch", side_effect=replace):
+			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
+		self.assertEqual(self.db.set_value.call_count, 1)  # Initial claim only.
+		self.assertEqual(self.doc.status, "Running")
+		self.save_file.assert_not_called()
+
+	def test_timeout_and_cancellation_escape_document_isolation(self):
+		for exception in (verifier.JobTimeoutException, KeyboardInterrupt, SystemExit):
+			with self.subTest(exception=exception):
+				self.get_all.return_value = ["SCAN-1"]
+				self.loader.side_effect = exception("stop")
+				with self.assertRaises(exception):
+					verifier._document_row(self.doc, "PI-1", self.columns)
+		self.assertFalse(self.checkpoints)
+
+	def test_verifier_omits_pages_after_twenty(self):
+		self.get_all.return_value = ["SCAN-1", "SCAN-2"]
+		self.loader.return_value = {"attachments": [{"attachment": f"local-{i}.png"} for i in range(12)]}
+		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": "Matches"}}
+		row = verifier._document_row(self.doc, "PI-1", self.columns)
+		self.assertEqual(len(self.vision.call_args.args[0]), 20)
+		self.assertEqual(self.compress.call_count, 20)
+		self.assertIn("4 pages omitted", row["remarks"])
+
+	def test_lost_permission_at_job_start_fails_the_run(self):
+		self.has_permission.side_effect = frappe.PermissionError("Read denied")
+		with self.assertRaises(frappe.PermissionError):
+			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
+		self.assertEqual(self.doc.status, "Failed")
+		self.get_list.assert_not_called()
+		self.vision.assert_not_called()
+
+	def test_timeout_mid_batch_fails_run_and_keeps_partial_excel(self):
+		self.get_list.return_value = ["PI-1", "PI-2", "PI-3"]
+		self.get_all.return_value = ["SCAN-1"]
+		self.loader.return_value = {"attachments": [{"attachment": "/private/files/page.jpg"}]}
+		self.vision.side_effect = [
+			{"data": {"values": {"scan_weight": 10, "total_qty": 12, "difference": 2}, "remarks": ""}},
+			verifier.JobTimeoutException("job timed out"),
+		]
+		with (
+			patch.object(verifier, "decide_columns", return_value=self.columns),
+			self.assertRaises(verifier.JobTimeoutException),
+		):
+			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
+		self.assertEqual(self.doc.status, "Failed")
+		self.assertEqual(self.doc.processed_documents, 1)
+		self.save_file.assert_not_called()
+
+		self.assertEqual(verifier.build_excel(self.doc.name), "/private/files/test.xlsx")
+		self.xlsx.assert_called_once_with(
+			[
+				[column["label"] for column in self.columns],
+				["PI-1", "SCAN-1", "Completed", "", 10, 12, 2],
+			],
+			"Verification",
+		)
+		self.db.set_value.assert_called_with(
+			verifier.DOCTYPE, self.doc.name, "result_file", "/private/files/test.xlsx"
+		)
+
+	def test_build_excel_only_for_failed_runs_with_columns(self):
+		for status, columns in [("Completed", "[]"), ("Running", "[]"), ("Failed", None)]:
+			with self.subTest(status=status):
+				self.doc.update(status=status, columns=columns)
+				with self.assertRaises(frappe.ValidationError):
+					verifier.build_excel(self.doc.name)
+		self.save_file.assert_not_called()
+
+	def test_build_excel_requires_write_permission(self):
+		self.doc.update(status="Failed", columns=frappe.as_json(self.columns))
+		self.doc.check_permission.side_effect = frappe.PermissionError
+		with self.assertRaises(frappe.PermissionError):
+			verifier.build_excel(self.doc.name)
+		self.save_file.assert_not_called()
+
+	def test_rows_are_read_from_this_runs_checkpoints(self):
+		row = {"document": "PI-1", "status": "Completed", "remarks": "", "total_qty": 12}
+		self.get_all.return_value = [frappe._dict(response_payload=frappe.as_json(row))]
+		self.assertEqual(READ_CHECKPOINTS(self.doc), [row])
+		filters = self.get_all.call_args.kwargs["filters"]
+		self.assertEqual(filters["run_id"], self.doc.last_run_id)
+		self.assertEqual(filters["reference_name"], self.doc.name)
+		self.assertEqual(filters["phase"], "Verifier Row")
+
+	def test_run_button_state_follows_run_expiry(self):
+		cases = [
+			("Completed", datetime(2026, 10, 13, 12), True),
+			("Running", datetime(2026, 10, 13, 11, 59), False),
+			("Running", datetime(2026, 10, 12), True),
+		]
+		for status, started_on, can_run in cases:
+			with self.subTest(status=status, started_on=started_on):
+				self.doc.update(status=status, started_on=started_on, set_onload=Mock())
+				verifier.ScannedDocumentAIVerifier.onload(self.doc)
+				self.doc.set_onload.assert_called_once_with("can_run", can_run)

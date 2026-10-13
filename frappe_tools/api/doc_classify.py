@@ -19,7 +19,10 @@ def load_classification_pages(scanned_document: str) -> tuple[list, list[str]]:
 	details = frappe.get_all(
 		"Scanned Document Detail",
 		filters={"scanner_document": scanned_document, "is_deleted": 0},
-		fields=["name", "attachment", "original_attachment", "page_no", "ai_page_data", "ai_page_data_on"],
+		fields=[
+			"name", "attachment", "original_attachment", "page_no", "page_type", "title",
+			"layout_type", "is_deleted", "scanner_document", "ai_page_data", "ai_page_data_on",
+		],
 		order_by="page_no asc, name asc",
 	)
 	return details, [file_to_data_url(d.attachment) for d in details]
@@ -36,15 +39,18 @@ def get_layout_labels(layout):
 	}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def classify_scanned_document(scanned_document: str) -> dict:
 	"""Classify every page of a Scanned Document into its layout's sections,
 	writing title / page_type / layout_type back onto each Scanned Document Detail.
 	"""
-	reviewed = frappe.db.get_value("Scanned Document", scanned_document, "ai_reviewed", for_update=True)
-	if reviewed:
-		frappe.throw(_("This scan has been reviewed and is protected from AI changes."))
+	from frappe_tools.scan_categorization.categorize import check_scan_permission
+	from frappe_tools.scan_categorization.page_data import lock_page_snapshot
+
 	sd = frappe.get_doc("Scanned Document", scanned_document)
+	check_scan_permission(sd)
+	if sd.ai_reviewed:
+		frappe.throw(_("This scan has been reviewed and is protected from AI changes."))
 	if not sd.scanner_layout:
 		frappe.throw(_("This scan has no layout assigned."))
 
@@ -63,6 +69,9 @@ def classify_scanned_document(scanned_document: str) -> dict:
 	res = page_classifier.classify(labels, image_urls)
 	pages = res["pages"]
 
+	_current, reason = lock_page_snapshot(sd, details)
+	if reason:
+		frappe.throw(reason)
 	updated = []
 	for idx, d in enumerate(details):
 		p = pages[idx] if idx < len(pages) else {"section": "unknown", "page_type": "Front", "confidence": 0.0}

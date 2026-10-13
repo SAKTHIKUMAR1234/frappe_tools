@@ -11,7 +11,8 @@
   "enable_ai_categorization",
   "ai_confidence_threshold",
   "ai_batch_limit",
-  "ai_process_since"
+  "ai_process_since",
+  "ai_max_pages"
  ],
  "fields": [
   {
@@ -55,6 +56,12 @@
    "fieldtype": "Date",
    "label": "AI Process Since",
    "description": "Only scans created on or after this date. Blank includes all unchecked scans."
+  },
+  {
+   "fieldname": "ai_max_pages",
+   "fieldtype": "Int",
+   "label": "AI Max Pages",
+   "default": "30"
   }
  ],
  "grid_page_length": 50,

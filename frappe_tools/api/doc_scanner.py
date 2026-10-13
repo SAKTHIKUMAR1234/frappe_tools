@@ -1,6 +1,7 @@
 from urllib.parse import urlsplit
 
 from frappe_tools.utils import save_file_always_new
+from frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail import attach_files
 import frappe
 from six import string_types
 
@@ -344,6 +345,11 @@ def upload_image(image_data):
 		else:
 			# Existing file URL - set it directly without re-uploading
 			doc.db_set("attachment", attachment)
+			original = frappe.db.get_value(
+				"Scanned Document Detail", {"attachment": attachment, "is_deleted": 0}, "original_attachment",
+			)
+			if original:
+				doc.db_set("original_attachment", original)
 
 	return doc.name
 
@@ -425,6 +431,9 @@ def make_or_update_main_doc(
 	doc.save(ignore_permissions=True)
 	doc.set_prev_documents_delete()
 	doc.set_new_document_names()
+
+	for detail in documents or []:
+		attach_files(frappe.get_doc("Scanned Document Detail", detail))
 
 	return doc.name
 
