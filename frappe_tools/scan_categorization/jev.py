@@ -3,6 +3,7 @@
 import json
 import math
 import time
+from copy import deepcopy
 
 import requests
 
@@ -10,14 +11,47 @@ from frappe_tools.utils import llm
 
 URL = "https://openrouter.ai/api/alpha/decisions"
 MODEL = "typesafe/jev-1.13"
-MAX_REQUEST_BYTES = 24000
+MAX_INPUT_TOKENS = 26000
+
+
+def _estimated_tokens(state, questions):
+	return len(json.dumps({"state": state, "questions": questions}, ensure_ascii=False)) / 3.5
+
+
+def _trim_items(pages):
+	for page in pages:
+		items = page.get("items") or []
+		if len(items) > 15:
+			page["items_truncated"] = len(items) - 15
+			page["items"] = items[:15]
+
+
+def _drop_other_fields(pages):
+	for page in pages:
+		page.pop("other_fields", None)
+
+
+def _shorten_addresses(pages):
+	for page in pages:
+		for party in (page.get("parties") or {}).values():
+			if isinstance(party, dict) and isinstance(party.get("address"), str):
+				party["address"] = party["address"][:200]
+
+
+def _bounded_state(state, questions):
+	state = deepcopy(state)
+	for shrink in (_trim_items, _drop_other_fields, _shorten_addresses):
+		if _estimated_tokens(state, questions) <= MAX_INPUT_TOKENS:
+			return state
+		shrink(state.get("pages", []))
+	if _estimated_tokens(state, questions) > MAX_INPUT_TOKENS:
+		raise ValueError("Decision request exceeds the 26,000-token budget after shrinking page data.")
+	return state
 
 
 def decide(state: dict, questions: dict, target_doctype: str) -> dict:
 	"""Return validated choice answers and log every HTTP attempt."""
-	body = {"model": MODEL, "state": state, "questions": questions}
-	if len(json.dumps(body, ensure_ascii=False).encode()) > MAX_REQUEST_BYTES:
-		raise ValueError("Decision request is too large; reduce pages or layout sections.")
+	body = {"model": MODEL, "state": _bounded_state(state, questions), "questions": questions}
 	settings = llm.ensure_ready()
 	started = time.monotonic()
 	status, http_status, error = "Success", None, None

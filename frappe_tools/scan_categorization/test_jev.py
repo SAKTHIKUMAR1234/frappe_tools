@@ -1,3 +1,4 @@
+from copy import deepcopy
 from unittest.mock import Mock, patch
 
 import requests
@@ -55,5 +56,73 @@ class TestJev(UnitTestCase):
 
 	def test_oversized_state_never_calls_http(self):
 		with patch.object(jev.requests, "post") as post, self.assertRaises(ValueError):
-			jev.decide({"text": "x" * jev.MAX_REQUEST_BYTES}, self.questions, "Purchase Invoice")
+			jev.decide({"text": "x" * int(jev.MAX_INPUT_TOKENS * 3.5)}, self.questions, "Purchase Invoice")
 		post.assert_not_called()
+
+	def test_small_state_preserves_all_page_data(self):
+		from frappe_tools.scan_categorization.test_categorize import page_data
+
+		state = {"document": {"bill_no": "LOCAL-42"}, "pages": [page_data(1)]}
+		self.assertEqual(jev._bounded_state(state, self.questions), state)
+
+	def test_size_guard_order_and_preserved_fields(self):
+		from frappe_tools.scan_categorization.test_categorize import page_data
+
+		for stage in ("items", "other_fields", "addresses"):
+			with self.subTest(stage=stage):
+				page = page_data(1)
+				page["items"] = [{"description": "Printed row " * 250}] * 40
+				if stage in ("other_fields", "addresses"):
+					page["other_fields"] = {"Terms": "t" * 100000}
+				if stage == "addresses":
+					page["parties"]["supplier"]["address"] = "a" * 100000
+				state = {"document": {"bill_no": "LOCAL-42"}, "pages": [page]}
+				original = deepcopy(state)
+				self.assertGreater(jev._estimated_tokens(state, self.questions), jev.MAX_INPUT_TOKENS)
+				bounded = jev._bounded_state(state, self.questions)
+				self.assertLessEqual(jev._estimated_tokens(bounded, self.questions), jev.MAX_INPUT_TOKENS)
+				self.assertEqual(state, original)
+				self.assertEqual(bounded["document"], state["document"])
+				result = bounded["pages"][0]
+				self.assertEqual(result["items"], page["items"][:15])
+				self.assertEqual(result["items_truncated"], 25)
+				if stage == "items":
+					self.assertEqual(result["other_fields"], page["other_fields"])
+				else:
+					self.assertNotIn("other_fields", result)
+				expected_address = page["parties"]["supplier"]["address"]
+				self.assertEqual(result["parties"]["supplier"]["address"], expected_address[:200] if stage == "addresses" else expected_address)
+				for key in ("document_type", "document_number", "document_date", "references", "taxes", "totals"):
+					self.assertEqual(result[key], page[key])
+				for key in ("name", "gstin"):
+					self.assertEqual(result["parties"]["supplier"][key], page["parties"]["supplier"][key])
+
+	def test_guard_counts_questions_and_protects_essential_data(self):
+		state = {"pages": [{"references": {"irn": "x" * 92000}}]}
+		for current, questions in ((state, self.questions), ({}, {"instructions": "x" * 92000})):
+			with patch.object(jev.requests, "post") as post, self.assertRaises(ValueError):
+				jev.decide(current, questions, "Purchase Invoice")
+			post.assert_not_called()
+
+	def test_guard_keeps_every_page_and_only_counts_omitted_rows(self):
+		from frappe_tools.scan_categorization.test_categorize import page_data
+
+		pages = [page_data(1, items=None), page_data(2), page_data(3, items=[{"qty": "2"}] * 40)]
+		pages[0]["other_fields"] = {"Terms": "x" * 92000}
+		result = jev._bounded_state({"pages": pages}, self.questions)["pages"]
+		self.assertEqual([page["page_no"] for page in result], [1, 2, 3])
+		self.assertIsNone(result[0]["items"])
+		self.assertEqual(result[1]["items"], pages[1]["items"])
+		self.assertNotIn("items_truncated", result[0])
+		self.assertNotIn("items_truncated", result[1])
+		self.assertEqual(result[2]["items_truncated"], 25)
+		self.assertEqual(len(result[2]["items"]), 15)
+
+	def test_http_receives_bounded_state_without_trimming_saved_input(self):
+		state = {"pages": [{"items": [{"description": "x" * 3000}] * 40, "other_fields": None}]}
+		response = Mock(status_code=200)
+		response.json.return_value = {"answers": {"layout": self.answer}}
+		with patch.object(jev.requests, "post", return_value=response) as post:
+			jev.decide(state, self.questions, "Purchase Invoice")
+		self.assertEqual(len(post.call_args.kwargs["json"]["state"]["pages"][0]["items"]), 15)
+		self.assertEqual(len(state["pages"][0]["items"]), 40)
