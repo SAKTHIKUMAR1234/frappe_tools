@@ -5,7 +5,7 @@ import json
 import frappe
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count, IfNull, Min
-from frappe.utils import cint, now_datetime
+from frappe.utils import add_to_date, cint, get_datetime, now_datetime
 from frappe.utils.background_jobs import is_job_enqueued
 from rq.timeouts import JobTimeoutException
 
@@ -40,6 +40,8 @@ PAGE_SCHEMA = {
 }
 RAW_FIELDS = ("full_text", "handwritten", "item_table")
 PAGE_OUTPUT_TOKENS = 16000
+MAX_AUTO_ATTEMPTS = 3
+RETRY_AFTER_HOURS = 6
 
 SCAN_FIELDS = ("_doctype", "_docname", "scanner_layout", "ai_run_id", "ai_check_status", "ai_reviewed")
 DETAIL_FIELDS = (
@@ -71,7 +73,8 @@ def get_page_data(scanned_document: str, limit: int | None = None) -> list[dict]
 
 def _page_rows(scanned_document, limit=None):
 	return frappe.get_all(DETAIL, filters={"scanner_document": scanned_document, "is_deleted": 0},
-		fields=["name", "attachment", "title", "ai_page_data", "ai_page_data_attachment", "ai_page_error"],
+		fields=["name", "attachment", "title", "ai_page_data", "ai_page_data_attachment", "ai_page_error",
+			"ai_page_attempts", "ai_page_error_on"],
 		order_by="page_no asc, name asc", limit=limit)
 
 
@@ -89,15 +92,29 @@ def stored_pages(details: list[dict]) -> list[dict] | None:
 def page_data_values(page: dict, attachment: str) -> dict:
 	return {
 		"ai_page_data": json.dumps(page, ensure_ascii=False), "ai_page_data_on": now_datetime(),
-		"ai_page_data_attachment": attachment, "ai_page_error": None,
+		"ai_page_data_attachment": attachment, "ai_page_error": None, "ai_page_attempts": 0,
+		"ai_page_error_on": None,
 	}
 
 
 def read_pages(scan: dict, details: list[dict], *, retry_failed: bool) -> None:
 	run_id = frappe.generate_hash(length=16)
 	for detail in details:
-		if not is_read(detail) and (retry_failed or not detail.ai_page_error):
+		if not is_read(detail) and (retry_failed or is_retry_due(detail)):
 			read_page(scan, detail, run_id)
+
+
+def _retry_cutoff():
+	return add_to_date(now_datetime(), hours=-RETRY_AFTER_HOURS)
+
+
+def is_retry_due(detail: dict) -> bool:
+	"""A page with no error, or a failed page under the attempt cap whose last failure is old enough."""
+	if not detail.ai_page_error:
+		return True
+	return cint(detail.ai_page_attempts) < MAX_AUTO_ATTEMPTS and (
+		not detail.ai_page_error_on or get_datetime(detail.ai_page_error_on) <= _retry_cutoff()
+	)
 
 
 def read_page(scan: dict, detail: dict, run_id: str | None = None) -> None:
@@ -114,7 +131,8 @@ def read_page(scan: dict, detail: dict, run_id: str | None = None) -> None:
 	except JobTimeoutException:
 		raise
 	except Exception as exc:  # One unreadable page must not stop the other pages.
-		values = {"ai_page_error": str(exc)[:1000]}
+		values = {"ai_page_error": str(exc)[:1000], "ai_page_error_on": now_datetime(),
+			"ai_page_attempts": cint(detail.ai_page_attempts) + 1}
 	frappe.db.set_value(DETAIL, {"name": detail.name, "attachment": detail.attachment}, values,
 		update_modified=False)
 	frappe.db.commit()
@@ -160,13 +178,17 @@ def enqueue_page_extraction() -> int:
 
 
 def _scans_with_unread_pages(since):
-	"""Return (scan, unread page count) pairs, oldest scan first; pages with an error wait for a manual read."""
+	"""Return (scan, unread page count) pairs, oldest scan first, matching `is_retry_due`."""
 	detail, scan = DocType(DETAIL), DocType(SCAN)
 	query = (
 		frappe.qb.from_(detail).join(scan).on(scan.name == detail.scanner_document)
 		.select(detail.scanner_document, Count("*"))
 		.where((detail.is_deleted == 0) & detail.attachment.isnotnull() & (detail.attachment != ""))
-		.where((IfNull(detail.ai_page_error, "") == "") & _unread(detail))
+		.where(_unread(detail) & (
+			(IfNull(detail.ai_page_error, "") == "")
+			| ((IfNull(detail.ai_page_attempts, 0) < MAX_AUTO_ATTEMPTS)
+				& (IfNull(detail.ai_page_error_on, "1900-01-01") <= _retry_cutoff()))
+		))
 		.groupby(detail.scanner_document)
 		.orderby(Min(scan.creation)).orderby(detail.scanner_document)
 	)

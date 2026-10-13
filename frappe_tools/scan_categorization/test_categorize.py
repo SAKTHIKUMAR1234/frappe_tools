@@ -651,7 +651,8 @@ class TestCategorize(UnitTestCase):
 		self.add_pages(self.new_scan(creation="2099-01-01"))
 		failed = self.new_scan(creation="2099-01-01")
 		for detail in self.add_pages(failed, read=False):
-			frappe.db.set_value(flow.DETAIL, detail.name, "ai_page_error", "Local read failed")
+			frappe.db.set_value(flow.DETAIL, detail.name, {"ai_page_error": "Local read failed",
+				"ai_page_error_on": frappe.utils.now_datetime(), "ai_page_attempts": 1})
 		deleted = self.new_scan(creation="2099-01-01")
 		for detail in self.add_pages(deleted, read=False):
 			frappe.db.set_value(flow.DETAIL, detail.name, "is_deleted", 1)
@@ -671,6 +672,48 @@ class TestCategorize(UnitTestCase):
 			self.assertEqual(reader.enqueue_page_extraction(), 0)
 		self.assertEqual(enqueue.call_count, 3)
 		self.vision_mock.assert_not_called()
+
+	def fail_page(self, attempts, hours_ago):
+		frappe.db.set_value(flow.DETAIL, self.details[0].name, {
+			"ai_page_data": None, "ai_page_error": "Local read failed", "ai_page_attempts": attempts,
+			"ai_page_error_on": frappe.utils.add_to_date(frappe.utils.now_datetime(), hours=-hours_ago),
+		})
+
+	def selected(self):
+		return dict(reader._scans_with_unread_pages(None)).get(self.scan.name, 0)
+
+	def test_failed_page_is_retried_after_delay_and_resets_attempts(self):
+		self.fail_page(attempts=2, hours_ago=7)
+		self.assertEqual(self.selected(), 1)
+		reader.extract_scan_pages(self.scan.name)
+		self.vision_mock.assert_called_once()
+		detail = self.details[0].reload()
+		self.assertTrue(detail.ai_page_data)
+		self.assertEqual((detail.ai_page_attempts, detail.ai_page_error, detail.ai_page_error_on), (0, None, None))
+
+	def test_failed_page_is_not_retried_before_delay(self):
+		self.fail_page(attempts=1, hours_ago=5)
+		self.assertEqual(self.selected(), 0)
+		reader.extract_scan_pages(self.scan.name)
+		self.vision_mock.assert_not_called()
+
+	def test_failed_reads_stop_after_three_attempts(self):
+		self.fail_page(attempts=2, hours_ago=7)
+		self.vision_mock.side_effect = RuntimeError("Local provider failure")
+		reader.extract_scan_pages(self.scan.name)
+		detail = self.details[0].reload()
+		self.assertEqual(detail.ai_page_attempts, 3)
+		self.assertIn("Local provider failure", detail.ai_page_error)
+		self.fail_page(attempts=3, hours_ago=7)
+		self.assertEqual(self.selected(), 0)
+		reader.extract_scan_pages(self.scan.name)
+		self.vision_mock.assert_called_once()
+
+	def test_manual_retry_ignores_attempt_cap_and_delay(self):
+		self.fail_page(attempts=3, hours_ago=0)
+		reader.extract_scan_pages(self.scan.name, retry_failed=True)
+		self.vision_mock.assert_called_once()
+		self.assertEqual(self.details[0].reload().ai_page_attempts, 0)
 
 	def test_read_pages_now_needs_scan_permission_and_dedups(self):
 		with (

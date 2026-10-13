@@ -20,7 +20,7 @@ A vision model reads each scanned page once and stores the page data as JSON on 
 - The values are copied as printed. Missing values are null.
 - When another row already has data for the same attachment, the app copies that data and makes no vision call.
 - When the attachment of a page changes, the page is read again.
-- When a page cannot be read, or the response is cut off, the error is saved in AI Page Error and no page data is saved. The hourly job does not read a page with an error again. Use Read pages now to try again.
+- When a page cannot be read, or the response is cut off, the error is saved in AI Page Error and no page data is saved. The hourly job tries a failed page again 6 hours after the last failure, up to 3 failed attempts in total. A successful read resets the count. Read pages now tries again at once, also after 3 attempts.
 - The response can use up to 16,000 output tokens, or more when Max Tokens in Document Extraction Settings is higher.
 
 The scheduler runs the job every hour. It queues one job for each scan that has unread pages, oldest scan first, until the page limit is reached.
