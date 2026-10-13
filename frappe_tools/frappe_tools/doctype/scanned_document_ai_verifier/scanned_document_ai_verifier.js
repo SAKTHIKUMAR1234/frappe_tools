@@ -9,6 +9,14 @@ frappe.ui.form.on("Scanned Document AI Verifier", {
 	},
 
 	refresh(frm) {
+		if (!frm.is_new()) {
+			frm.add_custom_button(__("AI History"), () => {
+				frappe.set_route("List", "Document AI Call Log", {
+					reference_doctype: frm.doctype,
+					reference_name: frm.doc.name,
+				});
+			});
+		}
 		remove_progress_listener(frm);
 		listen_for_progress(frm);
 		show_progress(frm, frm.doc);

@@ -49,7 +49,11 @@ def _bounded_state(state, questions):
 	return state
 
 
-def decide(state: dict, questions: dict, target_doctype: str) -> dict:
+def decide(
+	state: dict, questions: dict, target_doctype: str, *,
+	phase: str | None = None, reference_doctype: str | None = None,
+	reference_name: str | None = None, run_id: str | None = None,
+) -> dict:
 	"""Return validated choice answers and log every HTTP attempt."""
 	body = {"model": MODEL, "state": _bounded_state(state, questions), "questions": questions}
 	settings = llm.ensure_ready()
@@ -92,4 +96,5 @@ def decide(state: dict, questions: dict, target_doctype: str) -> dict:
 			int((time.monotonic() - started) * 1000),
 			{"prompt_tokens": tokens, "total_tokens": tokens, "cost": usage.get("cost", 0)},
 			body, result, error,
+			phase=phase, reference_doctype=reference_doctype, reference_name=reference_name, run_id=run_id,
 		)

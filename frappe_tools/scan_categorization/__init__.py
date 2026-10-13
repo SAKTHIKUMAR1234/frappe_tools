@@ -76,7 +76,7 @@ def _page_data_values(page, attachment, image):
 	}
 
 
-def _get_page_data(scan, details, images):
+def _get_page_data(scan, details, images, *, run_id=None):
 	if not details:
 		return []
 	pages = []
@@ -89,7 +89,10 @@ def _get_page_data(scan, details, images):
 		pages.append({**page, "page_no": index})
 	if len(pages) == len(details):
 		return pages
-	return _extract_pages(images, target_doctype=scan._doctype)
+	return _extract_pages(
+		images, target_doctype=scan._doctype, reference_doctype="Scanned Document",
+		reference_name=scan.name, run_id=run_id,
+	)
 
 
 def _save_page_data(details, images, pages):
@@ -98,7 +101,7 @@ def _save_page_data(details, images, pages):
 			_page_data_values(page, detail.attachment, image), update_modified=False)
 
 
-def _extract_pages(images, *, target_doctype):
+def _extract_pages(images, *, target_doctype, **log_context):
 	result = llm.call_vision(
 		images,
 		"Extract the WHOLE data of every scanned business document page as structured JSON, "
@@ -118,7 +121,7 @@ def _extract_pages(images, *, target_doctype):
 		"is_blank_or_unreadable is a boolean; retain any readable data even on a partially unreadable page. "
 		"Include every top-level key from this shape, with no row or text length limit: "
 		+ json.dumps({"pages": [PAGE_SCHEMA]}),
-		target_doctype=target_doctype,
+		target_doctype=target_doctype, phase="Page Extraction", **log_context,
 	)
 	data = result.get("data")
 	if not isinstance(data, dict):

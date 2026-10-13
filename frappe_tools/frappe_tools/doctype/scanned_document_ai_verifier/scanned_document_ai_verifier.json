@@ -18,7 +18,8 @@
   "result_file",
   "error_log",
   "started_on",
-  "finished_on"
+  "finished_on",
+  "last_run_id"
  ],
  "fields": [
   {
@@ -109,6 +110,12 @@
    "fieldname": "finished_on",
    "fieldtype": "Datetime",
    "label": "Finished On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_run_id",
+   "fieldtype": "Data",
+   "label": "Last Run ID",
    "read_only": 1
   }
  ],

@@ -34,7 +34,12 @@ def ensure_ready():
 	return settings
 
 
-def call_vision(image_data_urls, system_prompt, user_prompt, *, extraction=None, target_doctype=None):
+def call_vision(
+	image_data_urls: list[str], system_prompt: str, user_prompt: str, *,
+	extraction: str | None = None, target_doctype: str | None = None,
+	phase: str | None = None, reference_doctype: str | None = None,
+	reference_name: str | None = None, run_id: str | None = None,
+) -> dict:
 	"""Call the configured vision model with N images + a JSON-mode prompt.
 
 	Retries transient failures up to `max_attempts` (from settings). Every
@@ -72,7 +77,10 @@ def call_vision(image_data_urls, system_prompt, user_prompt, *, extraction=None,
 
 	last_error = None
 	for attempt in range(1, max_attempts + 1):
-		outcome = _attempt_call(body, headers, timeout, model, extraction, target_doctype)
+		outcome = _attempt_call(
+			body, headers, timeout, model, extraction, target_doctype,
+			phase=phase, reference_doctype=reference_doctype, reference_name=reference_name, run_id=run_id,
+		)
 		if outcome.get("ok"):
 			return {
 				"data": outcome["data"],
@@ -84,10 +92,10 @@ def call_vision(image_data_urls, system_prompt, user_prompt, *, extraction=None,
 		if attempt < max_attempts:
 			time.sleep(min(2 * attempt, 8))
 
-	frappe.throw(_("LLM extraction failed after {0} attempt(s): {1}").format(max_attempts, last_error or _("unknown error")))
+	return frappe.throw(_("LLM extraction failed after {0} attempt(s): {1}").format(max_attempts, last_error or _("unknown error")))
 
 
-def _attempt_call(body, headers, timeout, model, extraction, target_doctype):
+def _attempt_call(body, headers, timeout, model, extraction, target_doctype, **log_context):
 	started = time.monotonic()
 	status = "Success"
 	http_status = None
@@ -117,17 +125,7 @@ def _attempt_call(body, headers, timeout, model, extraction, target_doctype):
 		finish_reason = first_choice.get("finish_reason")
 		parsed = safe_json_loads(raw_text)
 		if parsed is None:
-			# Surface WHY it failed: truncation (hit max_tokens) is the usual
-			# culprit and is deterministic across retries. Include a snippet of
-			# the raw text so the error alone is diagnostic.
-			if finish_reason == "length":
-				hint = _(" — response was truncated (finish_reason=length); raise 'Max Tokens' in Document Extraction Settings")
-			else:
-				hint = ""
-			snippet = raw_text[:200] if raw_text else "<empty response>"
-			raise ValueError(
-				_("could not parse JSON from model response{0}. Raw begins: {1}").format(hint, snippet)
-			)
+			raise ValueError(_json_error(raw_text, finish_reason))
 	except requests.Timeout as exc:
 		status, error = "Timeout", str(exc)
 	except requests.HTTPError as exc:
@@ -138,11 +136,19 @@ def _attempt_call(body, headers, timeout, model, extraction, target_doctype):
 		error = _extract_api_error(result) or str(exc)
 
 	latency_ms = int((time.monotonic() - started) * 1000)
-	_log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text, finish_reason)
+	_log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text, finish_reason, **log_context)
 
 	if status == "Success" and parsed is not None:
 		return {"ok": True, "data": parsed, "usage": usage, "latency_ms": latency_ms}
 	return {"ok": False, "error": error}
+
+
+def _json_error(raw_text, finish_reason):
+	hint = ""
+	if finish_reason == "length":
+		hint = _(" — response was truncated (finish_reason=length); raise 'Max Tokens' in Document Extraction Settings")
+	snippet = raw_text[:200] if raw_text else "<empty response>"
+	return _("could not parse JSON from model response{0}. Raw begins: {1}").format(hint, snippet)
 
 
 def _extract_api_error(result):
@@ -155,14 +161,20 @@ def _extract_api_error(result):
 	return None
 
 
-def _log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text=None, finish_reason=None):
+def _log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text=None, finish_reason=None, *,
+	phase=None, reference_doctype=None, reference_name=None, run_id=None, provider="OpenRouter",
+):
 	"""Persist a Document AI Call Log row. Never raises into the caller."""
 	try:
 		log = frappe.new_doc(CALL_LOG_DOCTYPE)
 		log.extraction = extraction
 		log.target_doctype = target_doctype
 		log.model = model
-		log.provider = "OpenRouter"
+		log.provider = provider
+		log.phase = phase
+		log.reference_doctype = reference_doctype
+		log.reference_name = reference_name
+		log.run_id = run_id
 		log.status = status
 		log.http_status = http_status
 		log.latency_ms = latency_ms

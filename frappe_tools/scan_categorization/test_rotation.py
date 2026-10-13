@@ -27,7 +27,8 @@ class TestRotation(UnitTestCase):
 			with self.subTest(extension=extension):
 				url = data_url(page_image(), extension)
 				with patch.object(cv2, "imencode", wraps=cv2.imencode) as encode:
-					corrected = correct_image(url, 90)
+					corrected, deskew = correct_image(url, 90)
+				self.assertEqual(deskew, 0.0)
 				self.assertTrue(corrected.startswith(signature))
 				self.assertEqual(encode.call_args.args[0], extension)
 				self.assertEqual(encode.call_args.args[2], [cv2.IMWRITE_JPEG_QUALITY, 92] if extension == ".jpg" else [])
@@ -39,8 +40,9 @@ class TestRotation(UnitTestCase):
 		for angle in (90, 180, 270):
 			with self.subTest(angle=angle):
 				crooked = np.rot90(image, angle // 90)
-				corrected = correct_image(data_url(crooked), angle)
+				corrected, deskew = correct_image(data_url(crooked), angle)
 				actual = cv2.imdecode(np.frombuffer(corrected, dtype=np.uint8), cv2.IMREAD_COLOR)
+				self.assertEqual(deskew, 0.0)
 				np.testing.assert_array_equal(actual, image)
 
 	def test_deskew_both_directions(self):
@@ -50,17 +52,18 @@ class TestRotation(UnitTestCase):
 				matrix = cv2.getRotationMatrix2D((450, 300), angle, 1)
 				tilted = cv2.warpAffine(image, matrix, (900, 600), borderValue=(255, 255, 255))
 				self.assertAlmostEqual(detect_skew(tilted), -angle, delta=0.5)
-				corrected = correct_image(data_url(tilted), 0)
+				corrected, deskew = correct_image(data_url(tilted), 0)
 				actual = cv2.imdecode(np.frombuffer(corrected, dtype=np.uint8), cv2.IMREAD_COLOR)
+				self.assertAlmostEqual(deskew, -angle, delta=0.5)
 				self.assertLess(abs(detect_skew(actual)), 0.5)
 				self.assertGreaterEqual(actual.shape[0], image.shape[0])
 
 	def test_no_rotation_for_upright_or_out_of_range_skew(self):
 		url = data_url(page_image())
-		self.assertIsNone(correct_image(url, 0))
+		self.assertEqual(correct_image(url, 0), (None, 0.0))
 		for angle in (0.49, -0.49, 15.01, -16, 30):
 			with patch("frappe_tools.scan_categorization.rotation.detect_skew", return_value=angle):
-				self.assertIsNone(correct_image(url, 0))
+				self.assertEqual(correct_image(url, 0), (None, 0.0))
 
 	def test_invalid_image_or_rotation(self):
 		with self.assertRaises(ValueError):
