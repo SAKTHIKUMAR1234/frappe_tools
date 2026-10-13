@@ -1,4 +1,4 @@
-"""Lossless quarter turns and conservative line-based deskew of page images."""
+"""Quarter turns and conservative line-based deskew of page images."""
 
 import base64
 import math
@@ -29,8 +29,16 @@ def detect_skew(image: np.ndarray) -> float:
 	return float(np.median(angles)) if angles else 0.0
 
 
+def image_extension(data_url: str) -> str:
+	mime = data_url.split(";", 1)[0]
+	if mime not in ("data:image/jpeg", "data:image/png"):
+		raise ValueError("Scanned page image must be JPEG or PNG")
+	return ".jpg" if mime == "data:image/jpeg" else ".png"
+
+
 def correct_image(data_url: str, clockwise: int) -> bytes | None:
-	"""Return corrected PNG bytes, or None when no correction is needed."""
+	"""Return corrected bytes in the original format, or None when unchanged."""
+	extension = image_extension(data_url)
 	if clockwise not in (0, 90, 180, 270):
 		raise ValueError("Rotation must be 0, 90, 180 or 270")
 	raw = base64.b64decode(data_url.split(",", 1)[1], validate=True)
@@ -59,7 +67,8 @@ def correct_image(data_url: str, clockwise: int) -> bytes | None:
 		)
 	if not clockwise and not deskew:
 		return None
-	ok, encoded = cv2.imencode(".png", image)
+	params = [cv2.IMWRITE_JPEG_QUALITY, 92] if extension == ".jpg" else []
+	ok, encoded = cv2.imencode(extension, image, params)
 	if not ok:
 		raise ValueError("Cannot encode corrected page image")
 	return encoded.tobytes()

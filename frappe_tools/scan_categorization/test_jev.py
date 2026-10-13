@@ -55,9 +55,18 @@ class TestJev(UnitTestCase):
 		self.assertEqual(self.log.call_args.args[4], 503)
 
 	def test_oversized_state_never_calls_http(self):
-		with patch.object(jev.requests, "post") as post, self.assertRaises(ValueError):
+		with patch.object(jev.requests, "post") as post, self.assertRaisesRegex(ValueError, "26,000-token budget after shrinking"):
 			jev.decide({"text": "x" * int(jev.MAX_INPUT_TOKENS * 3.5)}, self.questions, "Purchase Invoice")
 		post.assert_not_called()
+
+	def test_request_over_24000_bytes_within_token_budget_is_sent(self):
+		state = {"text": "Printed invoice data " * 3000}
+		self.assertLess(jev._estimated_tokens(state, self.questions), jev.MAX_INPUT_TOKENS)
+		response = Mock(status_code=200)
+		response.json.return_value = {"answers": {"layout": self.answer}}
+		with patch.object(jev.requests, "post", return_value=response) as post:
+			jev.decide(state, self.questions, "Purchase Invoice")
+		self.assertEqual(post.call_args.kwargs["json"]["state"], state)
 
 	def test_small_state_preserves_all_page_data(self):
 		from frappe_tools.scan_categorization.test_categorize import page_data

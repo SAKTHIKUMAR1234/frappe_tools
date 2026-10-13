@@ -14,19 +14,14 @@ def _layout_sections(layout_name):
 	return [{"title": s.title, "layout_type": s.layout_type} for s in layout.layout_doctype_sections]
 
 
-def load_classification_pages(scanned_document: str, *, for_update: bool = False) -> tuple[list, list[str]]:
+def load_classification_pages(scanned_document: str) -> tuple[list, list[str]]:
 	"""Share ordered active pages and the existing S3-aware image reader."""
 	details = frappe.get_all(
 		"Scanned Document Detail",
 		filters={"scanner_document": scanned_document, "is_deleted": 0},
-		fields=["name", "attachment", "original_attachment", "page_no"],
+		fields=["name", "attachment", "original_attachment", "page_no", "ai_page_data", "ai_page_data_on"],
 		order_by="page_no asc, name asc",
 	)
-	if for_update:
-		details = [frappe.db.get_value(
-			"Scanned Document Detail", detail.name, "*", as_dict=True, for_update=True,
-		) for detail in details]
-		details = [d for d in details if d and not d.is_deleted and d.scanner_document == scanned_document]
 	return details, [file_to_data_url(d.attachment) for d in details]
 
 

@@ -35,11 +35,34 @@ def get_page_data(scanned_document: str) -> list[dict]:
 	The caller owns the transaction. Page numbers are 1-based active image indices.
 	Saved JSON includes an internal _source fingerprint, omitted from the result.
 	"""
-	scan = frappe.db.get_value("Scanned Document", scanned_document, "*", as_dict=True, for_update=True)
+	scan = frappe.db.get_value("Scanned Document", scanned_document, "*", as_dict=True)
 	if not scan:
 		raise frappe.DoesNotExistError(scanned_document)
-	details, images = load_classification_pages(scanned_document, for_update=True)
-	return _get_page_data(scan, details, images)
+	details, images = load_classification_pages(scanned_document)
+	pages = _get_page_data(scan, details, images)
+	_current, reason = _lock_page_snapshot(scan, details)
+	if reason:
+		raise ValueError(reason)
+	_save_page_data(details, images, pages)
+	return pages
+
+
+def _lock_page_snapshot(scan, details):
+	current = frappe.db.get_value("Scanned Document", scan.name, "*", as_dict=True, for_update=True)
+	if not current:
+		return None, "Scan was removed during AI processing."
+	rows = frappe.db.get_values(
+		"Scanned Document Detail", {"scanner_document": scan.name},
+		["name", "attachment", "page_no", "is_deleted"], as_dict=True,
+		order_by="page_no asc, name asc", for_update=True,
+	)
+	active = [row for row in rows if not row.is_deleted]
+	fields = ("name", "attachment", "page_no")
+	if [tuple(row.get(key) for key in fields) for row in active] != [
+		tuple(row.get(key) for key in fields) for row in details
+	]:
+		return current, "Scan pages changed during AI processing."
+	return current, ""
 
 
 def _source(attachment, image):
@@ -66,11 +89,13 @@ def _get_page_data(scan, details, images):
 		pages.append({**page, "page_no": index})
 	if len(pages) == len(details):
 		return pages
-	pages = _extract_pages(images, target_doctype=scan._doctype)
+	return _extract_pages(images, target_doctype=scan._doctype)
+
+
+def _save_page_data(details, images, pages):
 	for detail, image, page in zip(details, images, pages, strict=True):
 		frappe.db.set_value("Scanned Document Detail", detail.name,
 			_page_data_values(page, detail.attachment, image), update_modified=False)
-	return pages
 
 
 def _extract_pages(images, *, target_doctype):
@@ -114,19 +139,18 @@ def _printed_values(value):
 def _validate_pages(pages, count):
 	if not isinstance(pages, list) or len(pages) != count:
 		raise ValueError("Vision response must describe every page exactly once")
-	by_page = {}
-	for page in pages:
+	for index, page in enumerate(pages, 1):
 		if (
 			not isinstance(page, dict) or not PAGE_SCHEMA.keys() <= page.keys()
-			or type(page["page_no"]) is not int or not 1 <= page["page_no"] <= count
-			or page["page_no"] in by_page
+			or type(page["page_no"]) is not int
 			or type(page["rotation"]) is not int or page["rotation"] not in (0, 90, 180, 270)
 			or type(page["is_blank_or_unreadable"]) is not bool
 		):
 			raise ValueError("Invalid vision page identity, fields or rotation")
+		if page["page_no"] != index:
+			raise ValueError("Vision response must describe every page exactly once in image order")
 		_validate_data(page)
-		by_page[page["page_no"]] = page
-	return [by_page[index] for index in range(1, count + 1)]
+	return pages
 
 
 def _validate_data(page):

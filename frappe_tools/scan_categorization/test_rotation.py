@@ -16,11 +16,24 @@ def page_image() -> np.ndarray:
 	return image
 
 
-def data_url(image: np.ndarray) -> str:
-	return "data:image/png;base64," + base64.b64encode(cv2.imencode(".png", image)[1]).decode()
+def data_url(image: np.ndarray, extension=".png") -> str:
+	mime = "image/jpeg" if extension == ".jpg" else "image/png"
+	return f"data:{mime};base64," + base64.b64encode(cv2.imencode(extension, image)[1]).decode()
 
 
 class TestRotation(UnitTestCase):
+	def test_preserves_image_format(self):
+		for extension, signature in ((".jpg", b"\xff\xd8\xff"), (".png", b"\x89PNG\r\n\x1a\n")):
+			with self.subTest(extension=extension):
+				url = data_url(page_image(), extension)
+				with patch.object(cv2, "imencode", wraps=cv2.imencode) as encode:
+					corrected = correct_image(url, 90)
+				self.assertTrue(corrected.startswith(signature))
+				self.assertEqual(encode.call_args.args[0], extension)
+				self.assertEqual(encode.call_args.args[2], [cv2.IMWRITE_JPEG_QUALITY, 92] if extension == ".jpg" else [])
+				actual = cv2.imdecode(np.frombuffer(corrected, dtype=np.uint8), cv2.IMREAD_COLOR)
+				self.assertEqual(actual.shape, (900, 600, 3))
+
 	def test_quarter_turns(self):
 		image = page_image()
 		for angle in (90, 180, 270):
