@@ -195,7 +195,7 @@ def _ready_to_apply(scan, details):
 		reason = "Scan status or review changed during AI processing."
 	if not reason:
 		return True
-	if current:
+	if current and not current.ai_reviewed:
 		frappe.db.set_value(SCAN, scan.name, {
 			"ai_check_status": "Needs Review", "ai_error": reason, "ai_checked_on": now_datetime(),
 		})
