@@ -270,7 +270,8 @@ scheduler_events = {
            "frappe_tools.frappe_tools.doctype.custom_data_builder.custom_data_builder.delete_old_previews"
         ],
         "0 * * * *" : [
-            "frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail.remove_old_deletable_documents"
+            "frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail.remove_old_deletable_documents",
+            "frappe_tools.scan_categorization.page_data.enqueue_page_extraction"
         ]
     }
 }

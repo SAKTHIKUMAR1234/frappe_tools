@@ -1,6 +1,6 @@
 # Scan AI Guide
 
-This guide covers the PDF preview, the nightly AI categorization, the Scanned Document AI Verifier and the AI history for scans.
+This guide covers the PDF preview, the hourly page reading, the nightly AI categorization, the Scanned Document AI Verifier and the AI history for scans.
 
 ## Requirements
 
@@ -12,13 +12,34 @@ This guide covers the PDF preview, the nightly AI categorization, the Scanned Do
 
 The PDF button on a scanned document opens a large dialog in the same page. The dialog shows the PDF. Use the Download button in the dialog to save the file. The file name is `Document_Scan_<name>.pdf`.
 
+## Hourly page reading
+
+A vision model reads each scanned page once and stores the page data as JSON on its Scanned Document Detail row (AI Page Data). The categorization and the verifier use this stored data. They do not send page images again.
+
+- One vision call reads one page. The page data has the document fields, parties, references, items, the printed item table (all columns and rows), taxes, totals, other labelled fields, handwritten notes, signatures and stamps, and the full page text.
+- The values are copied as printed. Missing values are null.
+- When another row already has data for the same attachment, the app copies that data and makes no vision call.
+- When the attachment of a page changes, the page is read again.
+- When a page cannot be read, or the response is cut off, the error is saved in AI Page Error and no page data is saved. The hourly job does not read a page with an error again. Use Read pages now to try again.
+- The response can use up to 16,000 output tokens, or more when Max Tokens in Document Extraction Settings is higher.
+
+The scheduler runs the job every hour. It queues one job for each scan that has unread pages, oldest scan first, until the page limit is reached.
+
+| Setting (Document Scanner Settings) | Default | Meaning |
+|---|---|---|
+| Enable Page Extraction | Off | Switch for the hourly job. |
+| Page Extraction Batch Limit | 500 | Maximum pages to read each hour. |
+| AI Process Since | Blank | Only scans created on or after this date. |
+
+Read pages now (in the AI group of a Scanned Document) queues the page reading of that scan at once, also for pages with an error. It needs the same permission as Run AI check.
+
 ## Nightly AI categorization
 
 ### What it does
 
-1. A vision model reads each page and returns the page data as JSON.
+1. The job uses the stored page data. It makes no vision call. A scan with an unread page is skipped and stays without an AI status, so a later night picks it up. A skipped scan does not count against the batch limit.
 2. Jev by TypeSafe (through OpenRouter) decides the layout and the page section of each page.
-3. OpenCV fixes the rotation and the tilt of each page.
+3. OpenCV fixes the rotation (from the stored page data) and the tilt of each page.
 4. The app applies the result only when the layout confidence is at or above the threshold. Otherwise the scan gets the status Needs Review.
 
 The app keeps the original page images. A corrected page is saved as a new file.
@@ -46,7 +67,8 @@ The buttons are in the AI group. Only a System Manager, or a user who can write 
 
 | Button | Action |
 |---|---|
-| Run AI check | Queues the scan now. It needs Enable AI Categorization. |
+| Read pages now | Queues the page reading of the scan now. |
+| Run AI check | Queues the scan now. It needs Enable AI Categorization and stored data for all pages. |
 | Mark reviewed | Sets the status to Done and stops all later AI checks of this scan. |
 | AI History | Opens the AI call logs of this scan. |
 
@@ -61,7 +83,7 @@ The buttons are in the AI group. Only a System Manager, or a user who can write 
 
 ## Scanned Document AI Verifier
 
-Use the verifier to compare the scans of many documents with the document data and get the result in an Excel file.
+Use the verifier to compare the scans of many documents with the document data and get the result in an Excel file. The verifier sends the stored page data of each scan, not the page images. It reads only the pages that have no stored data yet. The model takes scan values only from the page data and gives null when a value is not there.
 
 ### How to use it
 
@@ -118,7 +140,7 @@ Every AI call is saved in the Document AI Call Log. The log keeps the model, sta
 
 | Phase | Used by |
 |---|---|
-| Page Extraction | Reading one page. |
+| Page Extraction | Reading one page. The reference is the scan. |
 | Layout Decision | Choosing the layout of a scan. |
 | Section Decision | Choosing the section of the pages. |
 | Categorization Outcome | The final result of one scan check. |

@@ -14,7 +14,9 @@
   "title",
   "original_attachment",
   "ai_page_data",
-  "ai_page_data_on"
+  "ai_page_data_on",
+  "ai_page_data_attachment",
+  "ai_page_error"
  ],
  "fields": [
   {
@@ -82,12 +84,24 @@
    "fieldtype": "Datetime",
    "label": "AI Page Data On",
    "read_only": 1
+  },
+  {
+   "fieldname": "ai_page_data_attachment",
+   "fieldtype": "Small Text",
+   "label": "AI Page Data Attachment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ai_page_error",
+   "fieldtype": "Small Text",
+   "label": "AI Page Error",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-12 12:00:00.000000",
+ "modified": "2026-10-13 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Scanned Document Detail",

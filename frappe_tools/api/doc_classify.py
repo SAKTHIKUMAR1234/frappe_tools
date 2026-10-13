@@ -21,7 +21,7 @@ def load_classification_pages(scanned_document: str) -> tuple[list, list[str]]:
 		filters={"scanner_document": scanned_document, "is_deleted": 0},
 		fields=[
 			"name", "attachment", "original_attachment", "page_no", "page_type", "title",
-			"layout_type", "is_deleted", "scanner_document", "ai_page_data", "ai_page_data_on",
+			"layout_type", "is_deleted", "scanner_document", "ai_page_data", "ai_page_data_attachment",
 		],
 		order_by="page_no asc, name asc",
 	)

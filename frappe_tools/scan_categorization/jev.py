@@ -7,6 +7,7 @@ from copy import deepcopy
 
 import requests
 
+from frappe_tools.scan_categorization.page_data import RAW_FIELDS
 from frappe_tools.utils import llm
 
 URL = "https://openrouter.ai/api/alpha/decisions"
@@ -16,6 +17,12 @@ MAX_INPUT_TOKENS = 26000
 
 def _estimated_tokens(state, questions):
 	return len(json.dumps({"state": state, "questions": questions}, ensure_ascii=False)) / 3.5
+
+
+def _drop_raw_fields(pages):
+	for page in pages:
+		for field in RAW_FIELDS:
+			page.pop(field, None)
 
 
 def _trim_items(pages):
@@ -40,6 +47,7 @@ def _shorten_addresses(pages):
 
 def _bounded_state(state, questions):
 	state = deepcopy(state)
+	_drop_raw_fields(state.get("pages", []))
 	for shrink in (_trim_items, _drop_other_fields, _shorten_addresses):
 		if _estimated_tokens(state, questions) <= MAX_INPUT_TOKENS:
 			return state

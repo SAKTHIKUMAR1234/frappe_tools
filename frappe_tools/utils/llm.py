@@ -39,13 +39,15 @@ def call_vision(
 	image_data_urls: list[str], system_prompt: str, user_prompt: str, *,
 	extraction: str | None = None, target_doctype: str | None = None,
 	phase: str | None = None, reference_doctype: str | None = None,
-	reference_name: str | None = None, run_id: str | None = None,
+	reference_name: str | None = None, run_id: str | None = None, min_output_tokens: int = 0,
 ) -> dict:
 	"""Call the configured vision model with N images + a JSON-mode prompt.
 
+	`min_output_tokens` raises the configured Max Tokens for callers that need long answers.
+
 	Retries transient failures up to `max_attempts` (from settings). Every
 	attempt writes a Document AI Call Log row. Returns a dict on success:
-	{"data": <parsed json>, "usage": {...}, "model": str, "latency_ms": int}.
+	{"data": <parsed json>, "usage": {...}, "model": str, "latency_ms": int, "finish_reason": str | None}.
 	Throws if all attempts fail.
 	"""
 	settings = ensure_ready()
@@ -64,7 +66,7 @@ def call_vision(
 			{"role": "user", "content": content},
 		],
 		"temperature": flt(settings.temperature) or 0,
-		"max_tokens": cint(settings.max_tokens) or 8192,
+		"max_tokens": max(cint(settings.max_tokens) or 8192, min_output_tokens),
 		"response_format": {"type": "json_object"},
 		"usage": {"include": True},
 	}
@@ -88,6 +90,7 @@ def call_vision(
 				"usage": outcome["usage"],
 				"model": model,
 				"latency_ms": outcome["latency_ms"],
+				"finish_reason": outcome["finish_reason"],
 			}
 		last_error = outcome.get("error")
 		if attempt < max_attempts:
@@ -139,7 +142,7 @@ def _attempt_call(body, headers, timeout, model, extraction, target_doctype, **l
 	log_call(extraction, target_doctype, model, status, http_status, latency_ms, usage, body, result, error, raw_text, finish_reason, **log_context)
 
 	if status == "Success" and parsed is not None:
-		return {"ok": True, "data": parsed, "usage": usage, "latency_ms": latency_ms}
+		return {"ok": True, "data": parsed, "usage": usage, "latency_ms": latency_ms, "finish_reason": finish_reason}
 	return {"ok": False, "error": error}
 
 

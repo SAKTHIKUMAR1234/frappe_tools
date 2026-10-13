@@ -10,14 +10,22 @@ frappe.ui.form.on("Scanned Document", {
 				reference_name: frm.doc.name,
 			});
 		}, __("AI"));
-		if (frm.doc.ai_reviewed) return;
 		const method = "frappe_tools.scan_categorization.categorize.";
 		const { message: allowed } = await frappe.call({
 			method: method + "can_check",
 			type: "GET",
 			args: { name: frm.doc.name },
 		});
-		if (!allowed || frm.doc.ai_reviewed) return;
+		if (!allowed) return;
+		frm.add_custom_button(__("Read pages now"), async () => {
+			const { message } = await frappe.call({
+				method: method + "read_pages_now",
+				args: { name: frm.doc.name },
+				freeze: true,
+			});
+			frappe.show_alert(message.queued ? __("Page reading queued") : __("Page reading is already queued"));
+		}, __("AI"));
+		if (frm.doc.ai_reviewed) return;
 		if (frm.doc.ai_check_status !== "Queued" || frappe.datetime.get_hour_diff(
 			frappe.datetime.now_datetime(), frm.doc.modified
 		) >= 6) {
