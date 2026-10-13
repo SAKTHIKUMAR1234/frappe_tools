@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import cv2
@@ -122,6 +123,7 @@ class TestCategorize(UnitTestCase):
 		self.details[1].reload()
 		self.assertEqual(self.details[0].original_attachment, original)
 		self.assertNotEqual(self.details[0].attachment, original)
+		self.assertTrue(self.details[0].attachment.endswith(".png"))
 		self.assertTrue(frappe.db.exists("File", {"file_url": original}))
 		self.assertTrue(frappe.db.exists("File", {"file_url": self.details[0].attachment, "attached_to_name": self.scan.name, "is_private": 1}))
 		self.assertEqual(self.details[1].title, self.titles[1])
@@ -155,6 +157,116 @@ class TestCategorize(UnitTestCase):
 			self.assertTrue(detail.ai_page_data)
 			self.assertTrue(detail.ai_page_data_on)
 
+	def test_external_calls_and_correction_precede_scan_locks_and_writes(self):
+		original_vision = self.vision_mock.return_value
+		original_correction = flow.correct_image
+		with patch.object(frappe.db, "sql", wraps=frappe.db.sql) as sql:
+			def assert_unlocked():
+				for call in sql.call_args_list:
+					query = str(call.args[0]).lower()
+					if "tabscanned document" in query:
+						self.assertNotIn("for update", query)
+						self.assertFalse(query.lstrip().startswith(("update", "insert", "delete")), query)
+
+			def vision(*args, **kwargs):
+				assert_unlocked()
+				return original_vision
+
+			def response(*args, **kwargs):
+				assert_unlocked()
+				return self.response(*args, **kwargs)
+
+			def correct(*args):
+				assert_unlocked()
+				return original_correction(*args)
+
+			self.vision_mock.side_effect = vision
+			self.post.side_effect = response
+			with patch.object(flow, "correct_image", side_effect=correct):
+				flow.categorize_scan(self.scan.name)
+			queries = [str(call.args[0]).lower() for call in sql.call_args_list]
+			for table in ("tabscanned document`", "tabscanned document detail`"):
+				self.assertTrue(any(table in query and "for update" in query for query in queries))
+		self.assertEqual(self.scan.reload().ai_check_status, "Done", self.scan.ai_error)
+
+	def test_changes_during_ai_require_review_without_applying(self):
+		def add_page():
+			frappe.copy_doc(self.details[0]).insert()
+
+		changes = {
+			"attachment": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "attachment", self.details[1].attachment),
+			"deleted": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "is_deleted", 1),
+			"removed": lambda: frappe.db.delete(flow.DETAIL, self.details[0].name),
+			"reordered": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "page_no", 3),
+			"moved": lambda: frappe.db.set_value(flow.DETAIL, self.details[0].name, "scanner_document", "local-other-scan"),
+			"added": add_page,
+			"status": lambda: frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Done"),
+			"reviewed": lambda: flow.mark_reviewed(self.scan.name),
+		}
+		for label, change in changes.items():
+			with self.subTest(change=label):
+				frappe.db.savepoint("concurrent_change")
+				def response(*args, **kwargs):
+					if "page_1" in kwargs["json"]["questions"]:
+						change()
+					return self.response(*args, **kwargs)
+				self.post.side_effect = response
+				with patch.object(flow, "_apply") as apply:
+					flow.categorize_scan(self.scan.name)
+				apply.assert_not_called()
+				self.scan.reload()
+				self.assertEqual(self.scan.ai_check_status, "Needs Review")
+				self.assertIn("changed during AI processing", self.scan.ai_error)
+				self.assertEqual(self.scan.ai_reviewed, int(label == "reviewed"))
+				self.assertFalse(self.details[1].reload().ai_page_data)
+				self.assertEqual(self.details[1].title, self.titles[0])
+				frappe.db.rollback(save_point="concurrent_change")
+
+	def test_change_during_image_correction_is_rechecked(self):
+		correct = flow.correct_image
+		def change(*args):
+			frappe.db.set_value(flow.DETAIL, self.details[0].name, "is_deleted", 1)
+			return correct(*args)
+		with patch.object(flow, "correct_image", side_effect=change):
+			flow.categorize_scan(self.scan.name)
+		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
+		self.assertFalse(self.details[0].reload().original_attachment)
+
+	def test_missing_or_out_of_order_vision_page_fails_scan(self):
+		for pages in ([page_data(1)], [page_data(2), page_data(1)], [page_data(1), page_data(1)]):
+			with self.subTest(pages=pages):
+				frappe.db.set_value(flow.SCAN, self.scan.name, "ai_check_status", "Queued")
+				self.vision_mock.return_value = {"data": {"pages": pages}}
+				with patch.object(frappe, "log_error"):
+					flow.categorize_scan(self.scan.name)
+				self.assertEqual(self.scan.reload().ai_check_status, "Failed")
+				self.assertIn("every page exactly once", self.scan.ai_error)
+				self.assertFalse(self.details[0].reload().ai_page_data)
+		self.post.assert_not_called()
+
+	def test_page_questions_follow_active_detail_order(self):
+		frappe.db.set_value(flow.DETAIL, self.details[0].name, "page_no", 5)
+		frappe.db.set_value(flow.DETAIL, self.details[1].name, "page_no", 9)
+		flow.categorize_scan(self.scan.name)
+		self.assertEqual(self.scan.reload().ai_check_status, "Done", self.scan.ai_error)
+		for detail, title in zip(self.details, self.titles, strict=True):
+			self.assertEqual(detail.reload().title, title)
+		self.assertEqual(list(self.post.call_args.kwargs["json"]["questions"]), ["page_1", "page_2"])
+
+	def test_corrected_jpeg_attachment_and_cache_keep_format(self):
+		content = cv2.imencode(".jpg", cv2.rotate(page_image(), cv2.ROTATE_90_COUNTERCLOCKWISE))[1].tobytes()
+		original = save_file_always_new(f"{self.prefix}.jpg", content, flow.SCAN, self.scan.name, is_private=1)
+		frappe.db.set_value(flow.DETAIL, self.details[0].name, "attachment", original.file_url)
+		flow.categorize_scan(self.scan.name)
+		self.assertEqual(self.scan.reload().ai_check_status, "Done", self.scan.ai_error)
+		detail = self.details[0].reload()
+		self.assertEqual(detail.original_attachment, original.file_url)
+		self.assertTrue(detail.attachment.endswith(".jpg"))
+		file = frappe.get_doc("File", {"file_url": detail.attachment})
+		self.assertTrue(file.get_content().startswith(b"\xff\xd8\xff"))
+		self.assertEqual(get_page_data(self.scan.name)[0]["rotation"], 0)
+		self.vision_mock.assert_called_once()
+
 	def test_low_layout_confidence_and_exact_threshold(self):
 		self.layout_confidence = 0.7
 		flow.categorize_scan(self.scan.name)
@@ -175,16 +287,26 @@ class TestCategorize(UnitTestCase):
 
 	def test_partial_application_is_rolled_back(self):
 		original = self.details[0].attachment
+		self.vision_mock.return_value["data"]["pages"][0]["rotation"] = 180
+		files = []
+		def save(*args, **kwargs):
+			file = save_file_always_new(*args, **kwargs)
+			files.append(file)
+			return file
+
 		set_value = frappe.db.set_value
 		def fail_second(doctype, name, *args, **kwargs):
 			if doctype == flow.DETAIL and name == self.details[1].name and "title" in args[0]:
 				raise RuntimeError("Second page write failed")
 			return set_value(doctype, name, *args, **kwargs)
-		with patch.object(frappe.db, "set_value", side_effect=fail_second), patch.object(frappe, "log_error"):
+		with patch.object(frappe.db, "set_value", side_effect=fail_second), patch.object(frappe, "log_error"), patch.object(flow, "save_file_always_new", side_effect=save):
 			flow.categorize_scan(self.scan.name)
 		self.assertEqual(self.scan.reload().ai_check_status, "Failed")
 		self.assertEqual(self.details[0].reload().attachment, original)
 		self.assertFalse(self.details[0].original_attachment)
+		self.assertEqual(len(files), 1)
+		self.assertFalse(frappe.db.exists("File", files[0].name))
+		self.assertFalse(Path(files[0].get_full_path()).exists())
 		self.assertEqual(get_page_data(self.scan.name), self.vision_mock.return_value["data"]["pages"])
 		self.vision_mock.assert_called_once()
 
@@ -275,7 +397,7 @@ class TestCategorize(UnitTestCase):
 			other_fields={"Terms": "Printed terms " * 100})
 		blank = {key: None for key in PAGE_SCHEMA}
 		blank.update(page_no=2, rotation=0, is_blank_or_unreadable=True)
-		self.vision_mock.return_value = {"data": {"pages": [blank, full]}}
+		self.vision_mock.return_value = {"data": {"pages": [full, blank]}}
 		self.assertEqual(_extract_pages(["one", "two"], target_doctype="Purchase Invoice"), [full, blank])
 		args = self.vision_mock.call_args
 		self.assertEqual(args.args[0], ["one", "two"])
