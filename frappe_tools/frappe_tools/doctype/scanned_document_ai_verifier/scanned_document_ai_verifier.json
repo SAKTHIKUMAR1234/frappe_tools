@@ -1,0 +1,145 @@
+{
+ "actions": [],
+ "autoname": "SDAV-.#####",
+ "creation": "2026-10-12 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "reference_doctype",
+  "filter_html",
+  "filters_data",
+  "prompt",
+  "max_documents",
+  "status",
+  "total_documents",
+  "processed_documents",
+  "failed_documents",
+  "columns",
+  "result_file",
+  "error_log",
+  "started_on",
+  "finished_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "filter_html",
+   "fieldtype": "HTML",
+   "label": "Filters"
+  },
+  {
+   "fieldname": "filters_data",
+   "fieldtype": "Code",
+   "label": "Filters Data",
+   "options": "JSON",
+   "hidden": 1
+  },
+  {
+   "fieldname": "prompt",
+   "fieldtype": "Long Text",
+   "label": "Prompt",
+   "reqd": 1
+  },
+  {
+   "fieldname": "max_documents",
+   "fieldtype": "Int",
+   "label": "Max Documents",
+   "default": "200"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nQueued\nRunning\nCompleted\nFailed",
+   "default": "Draft",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "total_documents",
+   "fieldtype": "Int",
+   "label": "Total Documents",
+   "read_only": 1
+  },
+  {
+   "fieldname": "processed_documents",
+   "fieldtype": "Int",
+   "label": "Processed Documents",
+   "read_only": 1
+  },
+  {
+   "fieldname": "failed_documents",
+   "fieldtype": "Int",
+   "label": "Failed Documents",
+   "read_only": 1
+  },
+  {
+   "fieldname": "columns",
+   "fieldtype": "Code",
+   "label": "Columns",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "result_file",
+   "fieldtype": "Attach",
+   "label": "Result File",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_log",
+   "fieldtype": "Long Text",
+   "label": "Error Log",
+   "read_only": 1
+  },
+  {
+   "fieldname": "started_on",
+   "fieldtype": "Datetime",
+   "label": "Started On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "finished_on",
+   "fieldtype": "Datetime",
+   "label": "Finished On",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Tools",
+ "name": "Scanned Document AI Verifier",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
