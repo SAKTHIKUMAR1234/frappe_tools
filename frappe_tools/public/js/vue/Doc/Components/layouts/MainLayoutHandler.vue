@@ -11,7 +11,9 @@
         <div ref="layout_select_ref" class="layout_select_ref">
         </div>
         <div v-if="dragMem.document_scanner_details.sections && Object.keys(dragMem.document_scanner_details.sections).length > 0"
-            v-for="value in Object.keys(dragMem.document_scanner_details.sections)" :key="value">
+            v-for="value in Object.keys(dragMem.document_scanner_details.sections)" :key="value"
+            :data-section="value" :class="{ 'scan-focused': isScanFocused(value) }"
+            @click="dragMem.focusSection(value)">
             <component :is="LayoutMapper[dragMem.document_scanner_details.sections[value].section_type]" v-bind="{
                 title: value,
                 is_new: props.is_new,
@@ -28,7 +30,7 @@ import FrontBackVertical from './FrontBackVertical.vue';
 import SinglePage from './SinglePage.vue';
 import SeriesVertical from './SeriesVertical.vue';
 import { reactive, ref, onMounted, watch } from 'vue';
-import { frappeCallAsync } from '../../../utils';
+import { frappeCallAsync, imageToDataURL } from '../../../utils';
 import { useGloabalDragMemory } from '../../../Store/doc_scanner_drag_drop_memory';
 
 const props = defineProps({
@@ -78,15 +80,19 @@ const LayoutMapper = {
     "Series Vertical": SeriesVertical
 };
 
-async function addToPages(value, pages) {
-    let reference = JSON.parse(JSON.stringify(dragMem.document_scanner_details));
-    reference['sections'][value]['images'].push(...pages);
-    await dragMem.setDocScannerDetails(reference);
+function isScanFocused(value) {
+    return Boolean(dragMem.document_scanner_details.auto_capture) && dragMem.focused_section === value;
 }
 
-async function removeOnPage(value, page_no) {
-    let reference = JSON.parse(JSON.stringify(dragMem.document_scanner_details));
-    const images = reference.sections[value].images;
+// Edit the live sections in place: a scan placed while a copy was being saved back would be lost.
+function addToPages(value, pages) {
+    const images = dragMem.document_scanner_details.sections[value].images;
+    images.push(...pages);
+    dragMem.renumberPages(images);
+}
+
+function removeOnPage(value, page_no) {
+    const images = dragMem.document_scanner_details.sections[value].images;
 
     let removalIndex = [];
 
@@ -104,7 +110,7 @@ async function removeOnPage(value, page_no) {
         }
     }
 
-    await dragMem.setDocScannerDetails(reference);
+    dragMem.renumberPages(images);
 }
 
 function sendAttachementDetails(image) {
@@ -113,9 +119,8 @@ function sendAttachementDetails(image) {
 
 
 
-async function removeOnImage(value, page_no, page_type) {
-    let reference = JSON.parse(JSON.stringify(dragMem.document_scanner_details));
-    const images = reference.sections[value].images;
+function removeOnImage(value, page_no, page_type) {
+    const images = dragMem.document_scanner_details.sections[value].images;
     let removable = null;
     for (let i = 0; i < images.length; i++) {
         if (page_no == images[i]['page_no'] && images[i]['page_type'] == page_type) {
@@ -124,11 +129,9 @@ async function removeOnImage(value, page_no, page_type) {
             break;
         }
     }
-    reference.sections[value].images = images;
     if (removable) {
         sendAttachementDetails(removable);
     }
-    await dragMem.setDocScannerDetails(reference);
 }
 
 async function uploadImagesWithConcurrency(sections, layout, concurrency = 2) {
@@ -270,6 +273,7 @@ function getSectionDetails(sections) {
 }
 
 const constructLayoutDetails = async (layout_doc) => {
+    dragMem.focusSection(null);
     await dragMem.setDocScannerDetails({
         "layout": layout_doc.name,
         "auto_capture": layout_doc.auto_capture,
@@ -285,32 +289,26 @@ const fetchLayoutDetails = async (layout_name) => {
     await constructLayoutDetails(layout_doc);
 };
 
-function setupDocumentScannerDetail(details) {
-    if (layout_select.value) {
-        let imageData = {};
-        for (let i = 0; i < details['attachments'].length; i++) {
-            let ele = details['attachments'][i];
-            if (!imageData[ele['title']]) {
-                imageData[ele['title']] = {}
-            }
-            if (!imageData[ele['title']][ele['layout_type']]) {
-                imageData[ele['title']][ele['layout_type']] = [];
-            }
-            imageData[ele['title']][ele['layout_type']].push({
-                "attachment": ele['attachment'],
-                "page_no": ele['page_no'],
-                "page_type": ele['page_type']
-            })
-        }
+// Converts stored images before touching the store, then merges them into the
+// live sections in place, so a scan received while loading is kept after them.
+async function setupDocumentScannerDetail(details) {
+    if (!layout_select.value) return;
 
-        let curr_details = JSON.parse(JSON.stringify(dragMem.document_scanner_details));
-        let keys = Object.keys(curr_details['sections']);
-        for (let key of keys) {
-            if (imageData[key] && imageData[key][curr_details['sections'][key]['section_type']]) {
-                curr_details['sections'][key]['images'] = [...curr_details['sections'][key]['images'], ...imageData[key][curr_details['sections'][key]['section_type']]]
-            }
-        }
-        dragMem.setDocScannerDetails(curr_details);
+    const attachments = await Promise.all(details['attachments'].map(async (ele) => ({
+        ...ele,
+        "attachment": ele['attachment'] ? await imageToDataURL(ele['attachment']) : ele['attachment'],
+    })));
+
+    for (const [key, section] of Object.entries(dragMem.document_scanner_details.sections)) {
+        const stored = attachments
+            .filter((ele) => ele['title'] === key && ele['layout_type'] === section.section_type)
+            .map((ele) => ({ "attachment": ele['attachment'], "page_no": ele['page_no'], "page_type": ele['page_type'] }));
+        if (!stored.length) continue;
+
+        const offset = Math.max(...stored.map((img) => img.page_no));
+        section.images.forEach((img) => { img.page_no += offset; });
+        section.images.unshift(...stored);
+        dragMem.renumberPages(section.images);
     }
 }
 
@@ -360,6 +358,15 @@ defineExpose({ save: validateUpdadeScannedDetails });
     top: 0;
     z-index: 10;
     background: #fff;
+}
+
+.scan-focused :deep(.doc-section-card) {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 1px #4f46e5;
+}
+
+.scan-focused :deep(.doc-section-header) {
+    background: #eef2ff;
 }
 
 .action_section .btn {

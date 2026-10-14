@@ -367,14 +367,14 @@ function handleDataMessage(e) {
 
             if (autoCapture.value && scanMode.value === 'template') {
                 // Layout auto-captures: skip the tray, append straight into the layout.
-                const placed = dragStore.appendScannedPage(dataUrl);
-                if (placed) {
-                    nextTick(scrollNewestPageIntoView);
+                const slot = dragStore.appendScannedPage(dataUrl);
+                if (slot) {
+                    nextTick(() => scrollScannedSlotIntoView(slot));
                 } else {
-                    // Layout has no section — keep the scan in the tray.
+                    // No section or free slot — keep the scan in the tray.
                     dragStore.setImagesDetails([...dragStore.imagesList, dataUrl]);
                     frappe.show_alert(
-                        { message: __('This layout has no section — scan kept in Unused Scans'), indicator: 'orange' },
+                        { message: __('No free slot in this layout — scan kept in Unused Scans'), indicator: 'orange' },
                         7
                     );
                 }
@@ -875,11 +875,10 @@ const exitExtract = () => {
     }
 }
 
-function scrollNewestPageIntoView() {
-    const cards = document.querySelectorAll('.main-content .doc-card');
-    if (cards.length) {
-        cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+function scrollScannedSlotIntoView({ section, page_index }) {
+    const sectionEl = document.querySelector(`.main-content [data-section="${CSS.escape(section)}"]`);
+    const card = sectionEl?.querySelectorAll('.doc-card')[page_index];
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // Keyboard-first controls (capture phase so they win over the browser/Frappe

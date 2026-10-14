@@ -1,6 +1,38 @@
 import { defineStore } from "pinia";
 import { imageToDataURL } from "../utils";
 
+const SIDE_ORDER = { Front: 0, Back: 1 };
+
+function findEmptySlot(images) {
+  return images
+    .filter((img) => !img.attachment)
+    .sort((a, b) => a.page_no - b.page_no || SIDE_ORDER[a.page_type] - SIDE_ORDER[b.page_type])[0];
+}
+
+// Fills the first empty slot, else appends a page; a filled Single Page takes no more.
+function placeScan(section, dataUrl) {
+  const images = section.images;
+  const slot = findEmptySlot(images);
+  if (slot) {
+    slot.attachment = dataUrl;
+    return slot;
+  }
+  if (section.section_type === "Single Page" && images.length) return null;
+
+  const page_no = Math.max(0, ...images.map((img) => img.page_no)) + 1;
+  const front = { page_no, page_type: "Front", attachment: dataUrl };
+  images.push(front);
+  if (section.section_type.startsWith("Front And Back")) {
+    images.push({ page_no, page_type: "Back", attachment: null });
+  }
+  return front;
+}
+
+function getPageIndex(images, page_no) {
+  const pageNumbers = [...new Set(images.map((img) => img.page_no))].sort((a, b) => a - b);
+  return pageNumbers.indexOf(page_no);
+}
+
 export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
   state: () => ({
     is_dragging: false,
@@ -12,7 +44,16 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
     curr_page_type: null,
     imagesList: [],
     document_scanner_details: {},
+    focused_section: null,
   }),
+
+  getters: {
+    defaultScanSection(state) {
+      const sections = state.document_scanner_details?.sections || {};
+      const keys = Object.keys(sections);
+      return keys.find((key) => sections[key].section_type === "Series Vertical") || keys[0];
+    },
+  },
 
   actions: {
     dragStart(curr_section, curr_page_no, curr_page_type) {
@@ -83,15 +124,7 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
       let keys = Object.keys(details.sections);
       for (let i = 0; i < keys.length; i++) {
         let images = details.sections[keys[i]].images;
-        let page_map = {};
-        let curr_page = 1;
-        for (let j = 0; j < images.length; j++) {
-          if (!page_map[images[j]["page_no"]]) {
-            page_map[images[j]["page_no"]] = curr_page;
-            curr_page += 1;
-          }
-          images[j]["page_no"] = page_map[images[j]["page_no"]];
-        }
+        this.renumberPages(images);
         await Promise.all(
           images.map(async (img) => {
             if (img.attachment) {
@@ -104,33 +137,40 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
       console.log(details);
     },
 
-    // For layouts with auto_capture: drop a freshly-scanned image straight into
-    // the layout as a new page, bypassing the Unused Scans tray.
-    // Returns false when there is no layout/section to append into.
-    appendScannedPage(dataUrl) {
-      const details = this.document_scanner_details;
-      if (!details || !details.sections) return false;
-      const sectionKeys = Object.keys(details.sections);
-      if (!sectionKeys.length) return false;
-
-      // Prefer a Series section (renders every page); else fall back to the first.
-      const targetKey =
-        sectionKeys.find(
-          (k) => details.sections[k].section_type === "Series Vertical"
-        ) || sectionKeys[0];
-      const images = details.sections[targetKey].images;
-
-      let maxPage = 0;
-      for (const img of images) {
-        if (img.page_no > maxPage) maxPage = img.page_no;
+    // Number pages 1..n in their current order; same page_no stays one page.
+    renumberPages(images) {
+      const page_map = {};
+      let curr_page = 1;
+      for (const image of images) {
+        if (!page_map[image.page_no]) {
+          page_map[image.page_no] = curr_page;
+          curr_page += 1;
+        }
+        image.page_no = page_map[image.page_no];
       }
+    },
 
-      images.push({
-        page_no: maxPage + 1,
-        page_type: "Front",
-        attachment: dataUrl,
-      });
-      return true;
+    focusSection(key) {
+      this.focused_section = key;
+    },
+
+    // For layouts with auto_capture: place a scan in the focused section (else
+    // the default one), filling the first empty slot before adding a page.
+    // Returns { section, page_index } of the filled slot, or null when none fits.
+    appendScannedPage(dataUrl) {
+      const sections = this.document_scanner_details?.sections;
+      if (!sections) return null;
+
+      const keys = [this.focused_section, this.defaultScanSection].filter(
+        (key) => key && sections[key]
+      );
+      for (const key of new Set(keys)) {
+        const slot = placeScan(sections[key], dataUrl);
+        if (slot) {
+          return { section: key, page_index: getPageIndex(sections[key].images, slot.page_no) };
+        }
+      }
+      return null;
     },
 
     async setImagesDetails(images) {
@@ -152,6 +192,7 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
     clearAll() {
       this.imagesList = [];
       this.document_scanner_details = {};
+      this.focused_section = null;
       this.reset();
     }
   },

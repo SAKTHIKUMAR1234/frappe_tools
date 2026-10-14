@@ -112,7 +112,7 @@ const onAddLayout = () => {
         {
             "page_no": imagePairs.value.length + 1,
             "page_type": "Back",
-            "attchment": null
+            "attachment": null
         }
     ]);
 };
