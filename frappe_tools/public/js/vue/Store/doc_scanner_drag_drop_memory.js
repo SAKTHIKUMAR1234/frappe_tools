@@ -104,8 +104,8 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
       console.log(details);
     },
 
-    // Auto-capture: drop a freshly-scanned image straight into the layout as a
-    // new page in the first section, bypassing the Unused Scans carousel.
+    // For layouts with auto_capture: drop a freshly-scanned image straight into
+    // the layout as a new page, bypassing the Unused Scans tray.
     // Returns false when there is no layout/section to append into.
     appendScannedPage(dataUrl) {
       const details = this.document_scanner_details;

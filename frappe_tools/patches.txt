@@ -7,3 +7,4 @@
 frappe_tools.patches.set_scan_ai_setting_defaults
 frappe_tools.patches.create_openrouter_account
 frappe_tools.patches.move_scan_page_data_to_file
+frappe_tools.patches.set_catch_all_layouts_auto_capture
