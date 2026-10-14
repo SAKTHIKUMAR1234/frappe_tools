@@ -137,3 +137,12 @@ class TestFileData(UnitTestCase):
 			move_scan_page_data_to_file.execute()
 		self.assertEqual(self.stored(file).ai_page_model, "local/kept")
 		self.vision.assert_not_called()
+
+
+class TestPageTextLines(UnitTestCase):
+	def test_text_given_as_lines_is_joined(self):
+		from frappe_tools.file_data.extraction import _validate_pages
+
+		page = {**deepcopy(PAGE_SCHEMA), "items": [], "handwritten": [], "item_table": None,
+			"full_text": ["TAX INVOICE", "Total 100"]}
+		self.assertEqual(_validate_pages([page], 1)[0]["full_text"], "TAX INVOICE\nTotal 100")
