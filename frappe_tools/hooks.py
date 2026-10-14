@@ -10,16 +10,18 @@ app_license = "mit"
 
 # required_apps = []
 
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "frappe_tools",
-# 		"logo": "/assets/frappe_tools/logo.png",
-# 		"title": "Frappe Tools",
-# 		"route": "/frappe_tools",
-# 		"has_permission": "frappe_tools.api.permission.has_app_permission"
-# 	}
-# ]
+app_logo_url = "/assets/frappe_tools/images/frappe-tools-logo.svg"
+app_home = "/desk/scanning"
+
+add_to_apps_screen = [
+	{
+		"name": app_name,
+		"logo": app_logo_url,
+		"title": app_title,
+		"route": app_home,
+		"has_permission": "frappe_tools.check_app_permission",
+	}
+]
 
 # Includes in <head>
 # ------------------
@@ -51,7 +53,7 @@ app_license = "mit"
 # Svg Icons
 # ------------------
 # include app icons in desk
-# app_include_icons = "frappe_tools/public/icons.svg"
+app_include_icons = ["/assets/frappe_tools/icons/module-icons.svg"]
 
 # Home Pages
 # ----------

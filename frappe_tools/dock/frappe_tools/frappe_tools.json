@@ -1,0 +1,31 @@
+{
+ "app": "frappe_tools",
+ "creation": "2026-10-14 13:30:00.000000",
+ "docstatus": 0,
+ "doctype": "Dock",
+ "idx": 0,
+ "items": [
+  {
+   "added": 0,
+   "hidden": 0,
+   "icon": "scanner-document-duotone",
+   "link_to": "Scanning",
+   "link_type": "Sidebar",
+   "title": "Scanning"
+  },
+  {
+   "added": 0,
+   "hidden": 0,
+   "icon": "toolbox-duotone",
+   "link_to": "Frappe Tools",
+   "link_type": "Sidebar",
+   "title": "Frappe Tools"
+  }
+ ],
+ "modified": "2026-10-14 13:30:00.000000",
+ "modified_by": "Administrator",
+ "name": "frappe_tools",
+ "owner": "Administrator",
+ "standard": 1,
+ "user": ""
+}
