@@ -8,7 +8,7 @@ section titles of a Document Scanner Layout), it asks the vision model to pick
 exactly one label per page (or 'unknown') and whether each page is Front/Back.
 
 CLASSIFICATION ONLY — it never extracts field/line values. Built on
-frappe_tools.utils.llm.call_vision (OpenRouter/Gemini, JSON mode).
+frappe_tools.utils.llm.call_vision with the Page Classification task.
 """
 
 import difflib
@@ -87,7 +87,7 @@ def classify(labels, image_data_urls):
 	Returns {model, latency_ms, usage, pages:[{page, section, page_type, confidence}]}.
 	"""
 	n = len(image_data_urls)
-	result = llm.call_vision(image_data_urls, SYSTEM_PROMPT, build_user_prompt(labels, n))
+	result = llm.call_vision(image_data_urls, SYSTEM_PROMPT, build_user_prompt(labels, n), task="Page Classification")
 	raw = (result.get("data") or {}).get("pages") or []
 	return {
 		"model": result.get("model"),

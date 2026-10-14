@@ -10,6 +10,8 @@
   "filters_data",
   "prompt",
   "max_documents",
+  "ai_account",
+  "model",
   "status",
   "total_documents",
   "processed_documents",
@@ -53,6 +55,19 @@
    "fieldtype": "Int",
    "label": "Max Documents",
    "default": "200"
+  },
+  {
+   "fieldname": "ai_account",
+   "fieldtype": "Link",
+   "label": "AI Account",
+   "options": "AI Provider Account",
+   "description": "Optional. Set with Model to use this account first. Leave both blank to use the Verifier rows in AI Task Models."
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "label": "Model",
+   "description": "Model ID for the AI Account. The Verifier rows in AI Task Models are the fallbacks."
   },
   {
    "fieldname": "status",
@@ -120,7 +135,7 @@
   }
  ],
  "links": [],
- "modified": "2026-10-12 00:00:00.000000",
+ "modified": "2026-10-14 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Scanned Document AI Verifier",

@@ -107,11 +107,12 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			)
 		)
 		self.log_error = self.enterContext(patch.object(verifier.frappe, "log_error"))
-		self.vision = self.enterContext(patch.object(verifier, "call_vision"))
+		self.vision = Mock()
+		self.enterContext(patch.object(verifier, "call_model", self.vision))
+		self.enterContext(patch.object(verifier, "call_agent", self.vision))
+		self.enterContext(patch.object(verifier, "get_prompt", return_value="Local verifier prompt."))
 		self.page_counts = {}
-		self.enterContext(patch.object(frappe.db, "count",
-			side_effect=lambda doctype, filters: self.page_counts.get(filters["scanner_document"], 1)))
-		self.loader = self.enterContext(patch.object(verifier, "get_page_data", side_effect=self.stored_pages))
+		self.loader = self.enterContext(patch.object(verifier, "get_document_pages", side_effect=self.stored_pages))
 		self.xlsx = self.enterContext(
 			patch.object(
 				verifier, "make_xlsx", return_value=BytesIO(b"local-test-xlsx")
@@ -131,9 +132,12 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		]
 		self.columns = verifier.FIXED_COLUMNS + self.value_columns
 
-	def stored_pages(self, scan, limit):
-		return [{"page_no": number, "section": "Invoice", "document_number": f"{scan}-{number}"}
-			for number in range(1, limit + 1)]
+	def stored_pages(self, doctype, name, limit):
+		count = self.page_counts.get(name, 1)
+		taken = min(count, limit)
+		pages = [{"page_no": number, "section": "Invoice", "document_number": f"{name}-{number}"}
+			for number in range(1, taken + 1)]
+		return pages, count - taken
 
 	def _get_meta(self, doctype):
 		return self.child_meta if doctype == "Purchase Invoice Item" else self.meta
@@ -211,8 +215,9 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.vision.return_value = {"data": {"columns": self.value_columns}}
 		columns = verifier.decide_columns("Purchase Invoice", self.doc.prompt)
 		self.assertEqual(columns, self.columns)
-		images, _, prompt = self.vision.call_args.args
-		self.assertEqual(images, [])
+		task, _, prompt = self.vision.call_args.args
+		self.assertEqual(task, "Verifier")
+		self.assertIsNone(self.vision.call_args.kwargs["route"])
 		payload = json.loads(prompt)
 		self.assertEqual(payload["prompt"], self.doc.prompt)
 		self.assertEqual(payload["fields"][0]["label"], "Total Quantity")
@@ -274,10 +279,11 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.doc.status = "Queued"
 		self.get_list.return_value = ["PI-OK", "PI-NONE", "PI-FAIL", "PI-AFTER"]
 		self.get_all.side_effect = [["SCAN-1", "SCAN-2"], [], ["SCAN-BAD"], ["SCAN-3"]]
-		def pages(scan, limit):
-			if scan == "SCAN-BAD":
+		self.page_counts["PI-NONE"] = 0
+		def pages(doctype, name, limit):
+			if name == "SCAN-BAD":
 				raise RuntimeError("Page unavailable")
-			return self.stored_pages(scan, limit)
+			return self.stored_pages(doctype, name, limit)
 
 		self.loader.side_effect = pages
 		self.vision.side_effect = [
@@ -300,11 +306,16 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
 		decide.assert_called_once_with(
 			"Purchase Invoice", self.doc.prompt, reference_name=self.doc.name, run_id=self.doc.last_run_id,
+			route=None,
 		)
 		self.assertEqual(self.doc.last_run_id, "local-run-token1")
 		for entry in self.vision.call_args_list:
-			self.assertEqual(entry.kwargs, {
-				"target_doctype": "Purchase Invoice", "phase": "Verifier Row",
+			kwargs = dict(entry.kwargs)
+			self.assertIs(kwargs.pop("tools"), verifier.READ_TOOLS)
+			self.assertGreater(kwargs.pop("deadline"), 0)
+			self.assertEqual(kwargs.pop("schema"), verifier._row_schema(self.value_columns))
+			self.assertEqual(kwargs, {
+				"target_doctype": "Purchase Invoice", "phase": "Verifier Agent Step", "route": None,
 				"reference_doctype": verifier.DOCTYPE, "reference_name": self.doc.name,
 				"run_id": self.doc.last_run_id,
 			})
@@ -323,7 +334,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		expected_rows = [
 			[column["label"] for column in self.columns],
 			["PI-OK", "SCAN-1, SCAN-2", "Completed", "2 kg difference", 10, 12, 2],
-			["PI-NONE", "", "No scan", "No scanned pages found.", None, None, None],
+			["PI-NONE", "", "No attachment", "No scanned pages or attached files found.", None, None, None],
 			["PI-FAIL", "SCAN-BAD", "Failed", "Page unavailable", None, None, None],
 			["PI-AFTER", "SCAN-3", "Completed", "Weight unreadable", None, 12, None],
 		]
@@ -337,8 +348,9 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			df="result_file",
 		)
 		self.assertEqual(self.vision.call_count, 2)
-		images, system_prompt, prompt = self.vision.call_args_list[0].args
-		self.assertEqual(images, [])
+		task, system_prompt, prompt = self.vision.call_args_list[0].args
+		self.assertEqual(task, "Verifier")
+		self.assertTrue(system_prompt.startswith("Local verifier prompt.\n\n"))
 		self.assertIn("only from the page data JSON", system_prompt)
 		payload = json.loads(prompt)
 		self.assertEqual(payload["pages"], [
@@ -500,8 +512,22 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": "Matches"}}
 		row = verifier._document_row(self.doc, "PI-1", self.columns)
 		self.assertEqual(len(json.loads(self.vision.call_args.args[2])["pages"]), 20)
-		self.assertEqual(self.loader.call_args_list, [call("SCAN-1", limit=12), call("SCAN-2", limit=8)])
+		self.assertEqual(self.loader.call_args_list, [
+			call("Scanned Document", "SCAN-1", limit=20), call("Scanned Document", "SCAN-2", limit=8),
+			call("Scanned Document", "SCAN-3", limit=0),
+		])
 		self.assertIn("7 pages omitted", row["remarks"])
+
+	def test_document_without_scan_uses_its_attached_files(self):
+		self.page_counts["PI-1"] = 22
+		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": "Matches"}}
+		row = verifier._document_row(self.doc, "PI-1", self.columns)
+		self.loader.assert_called_once_with("Purchase Invoice", "PI-1", limit=20)
+		pages = json.loads(self.vision.call_args.args[2])["pages"]
+		self.assertEqual(len(pages), 20)
+		self.assertNotIn("scanned_document", pages[0])
+		self.assertEqual((row["status"], row["scanned_documents"]), ("Completed", ""))
+		self.assertIn("2 pages omitted", row["remarks"])
 
 	def test_lost_permission_at_job_start_fails_the_run(self):
 		self.has_permission.side_effect = frappe.PermissionError("Read denied")
@@ -574,3 +600,29 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 				self.doc.update(status=status, started_on=started_on, set_onload=Mock())
 				verifier.ScannedDocumentAIVerifier.onload(self.doc)
 				self.doc.set_onload.assert_called_once_with("can_run", can_run)
+
+	def test_model_choice_is_the_first_route_for_columns_and_rows(self):
+		self.doc.update(ai_account="local-account", model="local-model")
+		self.vision.return_value = {"data": {"columns": self.value_columns}}
+		verifier.decide_columns("Purchase Invoice", self.doc.prompt, route=verifier._route(self.doc))
+		self.assertEqual(self.vision.call_args.kwargs["route"], ("local-account", "local-model"))
+		self.get_all.return_value = ["SCAN-1"]
+		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": ""}}
+		verifier._document_row(self.doc, "PI-1", self.columns)
+		self.assertEqual(self.vision.call_args.kwargs["route"], ("local-account", "local-model"))
+
+	def test_model_choice_needs_account_and_model(self):
+		for account, model in (("local-account", None), (None, "local-model")):
+			with self.subTest(account=account, model=model):
+				self.doc.update(status="Completed", ai_account=account, model=model)
+				with self.assertRaises(frappe.ValidationError):
+					verifier.run_verifier(self.doc.name)
+		self.enqueue.assert_not_called()
+
+	def test_row_schema_is_strict_and_requires_every_column(self):
+		schema = verifier._row_schema(self.value_columns)
+		values = schema["properties"]["values"]
+		self.assertEqual(values["required"], ["scan_weight", "total_qty", "difference"])
+		self.assertFalse(values["additionalProperties"])
+		self.assertFalse(schema["additionalProperties"])
+		self.assertEqual(schema["required"], ["values", "remarks"])

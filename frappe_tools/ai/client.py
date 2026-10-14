@@ -1,0 +1,237 @@
+"""Task routing, retries and attempt logs."""
+
+import time
+
+import frappe
+import requests
+from frappe.utils import cint, flt
+from rq.timeouts import JobTimeoutException
+
+from frappe_tools.ai import accounts
+from frappe_tools.ai.providers import ProviderError, anthropic, codex, error_message, openrouter
+from frappe_tools.utils import llm
+
+TASKS = ("Document Extraction", "Page Classification", "Page Extraction", "Scan Decision", "Verifier")
+PROVIDERS = {"OpenRouter": openrouter, "OpenAI Codex": codex, "Anthropic": anthropic}
+
+
+def call_model(
+	task: str,
+	system_prompt: str,
+	user_prompt: str,
+	*,
+	images: list[str] | None = None,
+	schema: dict | None = None,
+	extraction=None,
+	target_doctype=None,
+	phase=None,
+	reference_doctype=None,
+	reference_name=None,
+	run_id=None,
+	min_output_tokens: int = 0,
+	route: tuple[str, str] | None = None,
+) -> dict:
+	"""Try the chosen (account, model) `route`, then task models in priority order, and log each attempt."""
+	settings = task_settings(task)
+	options = task_options(settings, min_output_tokens)
+	prompts = (system_prompt, user_prompt, images or [], schema)
+	context = dict(
+		extraction=extraction,
+		target_doctype=target_doctype,
+		phase=phase,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		run_id=run_id,
+	)
+
+	def build(adapter, credentials, model):
+		return adapter.build_request(credentials, model, *prompts, options)
+
+	last_error = frappe._("No enabled AI model and account for this task")
+	for account, model in routes(settings, task, route):
+		outcome = try_model(account, model, build, options, context)
+		if outcome.get("ok"):
+			return outcome["result"]
+		last_error = outcome["error"]
+	return frappe.throw(frappe._("AI call failed: {0}").format(last_error))
+
+
+def task_settings(task: str):
+	if task not in TASKS:
+		frappe.throw(frappe._("Unknown AI task"))
+	return llm.ensure_ready()
+
+
+def task_options(settings, min_output_tokens: int = 0) -> dict:
+	return {
+		"temperature": flt(settings.temperature),
+		"max_tokens": max(cint(settings.max_tokens) or 8192, min_output_tokens),
+		"timeout": cint(settings.request_timeout) or 120,
+		"attempts": max(cint(settings.max_attempts), 1),
+	}
+
+
+def routes(settings, task: str, route: tuple[str, str] | None = None):
+	"""Yield (account, model): the chosen (account, model) route first, then the task rows."""
+	rows = [row for row in (settings.get("task_models") or []) if row.task == task]
+	if route and all(route):
+		account = frappe.get_doc("AI Provider Account", route[0])
+		if account.enabled:
+			yield account, route[1]
+		if not rows:
+			return
+	yield from _task_routes(settings, rows)
+
+
+def _task_routes(settings, rows):
+	if not rows:
+		yield _legacy_route(settings)
+		return
+	for row in rows:
+		if row.enabled:
+			account = frappe.get_doc("AI Provider Account", row.account)
+			if account.enabled:
+				yield account, row.model
+
+
+def _legacy_route(settings):
+	key = settings.get_api_key()
+	if not key:
+		frappe.throw(frappe._("OpenRouter API Key is not set in Document Extraction Settings."))
+	if not settings.model:
+		frappe.throw(frappe._("Set the legacy model in Document Extraction Settings."))
+	return {"provider": "OpenRouter", "api_key": key, "auth_type": "API Key"}, settings.model
+
+
+def try_model(account, model: str, build, options: dict, context: dict) -> dict:
+	"""Run one model request with retries; `build(adapter, credentials, model)` returns (url, headers, body)."""
+	for attempt in range(1, options["attempts"] + 1):
+		outcome = _attempt(account, model, build, options, context)
+		if outcome["ok"] or not outcome["retryable"]:
+			return outcome
+		if attempt < options["attempts"]:
+			time.sleep(min(2 * attempt, 8))
+	return outcome
+
+
+def _attempt(account, model, build, options, context):
+	started = time.monotonic()
+	state = dict(
+		body={},
+		result={},
+		usage={},
+		raw_text="",
+		finish_reason=None,
+		http_status=None,
+		status="Error",
+		error=frappe._("AI attempt did not complete"),
+		secrets=[],
+		calls=[],
+	)
+	provider = account.get("provider")
+	qualified_model = f"{provider}/{model}"
+	try:
+		_execute(account, model, build, options, state)
+		state.update(status="Success", error=None)
+	except JobTimeoutException:
+		state.update(status="Timeout", error=frappe._("AI job timed out"))
+		raise
+	except Exception as exc:
+		_failure(state, exc)
+	finally:
+		latency = int((time.monotonic() - started) * 1000)
+		_log_attempt(state, qualified_model, provider, latency, context)
+	if state["status"] == "Success":
+		return {
+			"ok": True,
+			"result": {
+				"data": state["data"],
+				"usage": state["usage"],
+				"model": qualified_model,
+				"latency_ms": latency,
+				"finish_reason": state["finish_reason"],
+				"tool_calls": state["calls"],
+				"response": state["result"],
+			},
+		}
+	return {"ok": False, "error": state["error"], "retryable": state["retryable"]}
+
+
+def _execute(account, model, build, options, state):
+	credentials = accounts.credentials(account, options["timeout"])
+	state["secrets"] = [credentials.get(field) for field in ("api_key", "access_token", "refresh_token")]
+	adapter = PROVIDERS[account.get("provider")]
+	url, headers, state["body"] = build(adapter, credentials, model)
+	response = requests.post(
+		url, headers=headers, json=state["body"], timeout=options["timeout"], stream=adapter is codex
+	)
+	try:
+		state["http_status"] = response.status_code
+		if response.status_code >= 400:
+			try:
+				state["result"] = response.json()
+			except ValueError:
+				state["result"] = {"non_json_response": llm.redact_secrets(response.text or "", state["secrets"])[:4000]}
+			raise ProviderError(
+				error_message(state["result"]) or frappe._("Provider returned HTTP {0}").format(response.status_code),
+				response.status_code,
+			)
+		state["raw_text"], state["usage"], state["finish_reason"], state["result"] = adapter.parse_response(
+			response
+		)
+		state["calls"] = adapter.tool_calls(state["result"]) if state["body"].get("tools") else []
+		state["data"] = llm.safe_json_loads(state["raw_text"])
+		if state["data"] is None and not state["calls"]:
+			raise ValueError(_json_error(state))
+	finally:
+		response.close()
+
+
+def _failure(state, exc):
+	if isinstance(exc, ProviderError):
+		if exc.result is not None:
+			state["result"] = exc.result
+		state["raw_text"] = exc.raw_text
+		state["finish_reason"] = exc.finish_reason
+	code = getattr(exc, "status_code", None) or state["http_status"]
+	state["http_status"] = code
+	state["status"] = "Timeout" if isinstance(exc, requests.Timeout) else "Error"
+	state["error"] = llm.redact_secrets(str(exc), state["secrets"])
+	if isinstance(exc, ProviderError):
+		state["error"] = state["error"][:500]
+		if exc.finish_reason == "incomplete":
+			state["error"] += ". " + _json_error(state)
+	state["retryable"] = _is_retryable(exc, code, state["finish_reason"])
+
+
+def _is_retryable(exc, code, finish_reason):
+	"""Retry network and server errors, and unparsable answers; not answers that ran out or failed."""
+	if isinstance(exc, requests.RequestException) or code in (408, 429) or (code or 0) >= 500:
+		return True
+	return bool(code) and code < 400 and finish_reason not in ("incomplete", "failed")
+
+
+def _json_error(state):
+	hint = ""
+	if state["finish_reason"] in ("length", "max_tokens", "incomplete"):
+		hint = frappe._(" — response was truncated; raise 'Max Tokens' in Document Extraction Settings")
+	snippet = llm.redact_secrets(state["raw_text"], state["secrets"])[:200] or frappe._("<empty response>")
+	return frappe._("could not parse JSON from model response{0}. Raw begins: {1}").format(hint, snippet)
+
+
+def _log_attempt(state, model, provider, latency, context):
+	llm.log_call(
+		model=model,
+		provider=provider,
+		status=state["status"],
+		http_status=state["http_status"],
+		latency_ms=latency,
+		usage=state["usage"],
+		body=state["body"],
+		result=state["result"],
+		error=state["error"],
+		raw_text=state["raw_text"],
+		finish_reason=state["finish_reason"],
+		secrets=state["secrets"],
+		**context,
+	)

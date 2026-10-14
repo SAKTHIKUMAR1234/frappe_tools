@@ -48,7 +48,7 @@
    "fieldname": "phase",
    "fieldtype": "Select",
    "label": "Phase",
-   "options": "\nPage Extraction\nLayout Decision\nSection Decision\nCategorization Outcome\nVerifier Columns\nVerifier Row",
+   "options": "\nPage Extraction\nLayout Decision\nSection Decision\nCategorization Outcome\nVerifier Columns\nVerifier Row\nVerifier Agent Step",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "read_only": 1
@@ -182,7 +182,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-18 12:30:00.000000",
+ "modified": "2026-10-14 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document AI Call Log",

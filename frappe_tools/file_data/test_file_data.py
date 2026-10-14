@@ -1,0 +1,139 @@
+import os
+from copy import deepcopy
+from io import BytesIO
+from unittest.mock import patch
+
+import frappe
+from frappe.tests import UnitTestCase
+from PIL import Image
+
+from frappe_tools.file_data import reader
+from frappe_tools.file_data.documents import files_for_document, get_document_pages
+from frappe_tools.file_data.extraction import PAGE_SCHEMA
+from frappe_tools.patches import move_scan_page_data_to_file
+from frappe_tools.utils import llm, save_file_always_new
+
+DETAIL = "Scanned Document Detail"
+
+
+def image_content(fmt="PNG") -> bytes:
+	buffer = BytesIO()
+	Image.frombytes("RGB", (4, 4), os.urandom(48)).save(buffer, fmt)
+	return buffer.getvalue()
+
+
+def pdf_content(pages: int) -> bytes:
+	images = [Image.frombytes("RGB", (40, 40), os.urandom(4800)) for _ in range(pages)]
+	buffer = BytesIO()
+	images[0].save(buffer, "PDF", save_all=True, append_images=images[1:])
+	return buffer.getvalue()
+
+
+class TestFileData(UnitTestCase):
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.addCleanup(frappe.db.rollback)
+		self.enterContext(patch.object(frappe.db, "commit"))
+		self.vision = self.enterContext(patch.object(llm, "call_vision", side_effect=self.read_image))
+		self.prefix = "local-file-data-" + frappe.generate_hash(length=8)
+		self.todo = frappe.get_doc({"doctype": "ToDo", "description": self.prefix}).insert()
+
+	def read_image(self, images, *args, **kwargs):
+		self.assertEqual(len(images), 1)
+		self.assertTrue(images[0].startswith("data:image/"))
+		page = {**deepcopy(PAGE_SCHEMA), "document_number": f"{self.prefix}-{self.vision.call_count}"}
+		return {"data": {"pages": [page]}, "model": "local/test-model"}
+
+	def attach(self, content, extension, field=None, doctype="ToDo", name=None):
+		return save_file_always_new(f"{self.prefix}.{extension}", content, doctype, name or self.todo.name,
+			is_private=1, df=field)
+
+	def stored(self, file):
+		return frappe.db.get_value("File", file.name, ["ai_page_data", "ai_page_count", "ai_page_model"], as_dict=True)
+
+	def test_image_file_is_read_once_and_stored_on_the_file(self):
+		file = self.attach(image_content(), "png")
+		pages, omitted = get_document_pages("ToDo", self.todo.name)
+		self.assertEqual((len(pages), omitted, pages[0]["page_no"]), (1, 0, 1))
+		stored = self.stored(file)
+		self.assertEqual(frappe.parse_json(stored.ai_page_data)["pages"][0]["document_number"], f"{self.prefix}-1")
+		self.assertEqual((stored.ai_page_count, stored.ai_page_model), (1, "local/test-model"))
+		self.assertEqual(self.vision.call_args.kwargs["reference_name"], self.todo.name)
+		self.assertEqual(get_document_pages("ToDo", self.todo.name)[0], pages)
+		self.vision.assert_called_once()
+
+	def test_pdf_pages_are_rendered_and_read_one_by_one(self):
+		file = self.attach(pdf_content(2), "pdf")
+		self.assertEqual([page["page_no"] for page in reader.read_file(file.name)["pages"]], [1, 2])
+		self.assertEqual(self.vision.call_count, 2)
+		self.assertTrue(all(call.args[0][0].startswith("data:image/jpeg") for call in self.vision.call_args_list))
+		self.assertEqual(self.stored(file).ai_page_count, 2)
+
+	def test_pdf_over_the_page_cap_notes_the_rest(self):
+		file = self.attach(pdf_content(3), "pdf")
+		with patch.object(reader, "MAX_FILE_PAGES", 2):
+			data = reader.read_file(file.name)
+		self.assertEqual((len(data["pages"]), data["omitted_pages"]), (2, 1))
+		self.assertEqual(self.stored(file).ai_page_count, 3)
+		self.assertEqual(get_document_pages("ToDo", self.todo.name, limit=1)[1], 2)
+
+	def test_same_content_is_copied_without_a_model_call(self):
+		content = image_content()
+		first = self.attach(content, "png")
+		reader.read_file(first.name)
+		other = frappe.get_doc({"doctype": "ToDo", "description": self.prefix}).insert()
+		copy = self.attach(content, "png", name=other.name)
+		self.assertEqual(reader.read_file(copy.name), frappe.parse_json(self.stored(first).ai_page_data))
+		self.assertEqual(self.stored(copy).ai_page_model, "local/test-model")
+		self.vision.assert_called_once()
+
+	def test_document_files_are_images_and_pdfs_in_field_then_creation_order(self):
+		late = self.attach(image_content(), "png")
+		self.attach(b"local text", "txt")
+		pdf = self.attach(pdf_content(1), "pdf", field="attachment")
+		early = self.attach(image_content("JPEG"), "jpg", field="attachment")
+		frappe.db.set_value("File", early.name, "creation", "2000-01-01")
+		self.assertEqual(files_for_document("ToDo", self.todo.name), [late.name, early.name, pdf.name])
+		pages, omitted = get_document_pages("ToDo", self.todo.name, limit=2)
+		self.assertEqual(([page["page_no"] for page in pages], omitted), ([1, 2], 1))
+		self.assertEqual(self.vision.call_count, 2)
+
+	def test_document_pages_need_read_permission(self):
+		self.attach(image_content(), "png")
+		with (
+			patch.object(frappe, "has_permission", side_effect=frappe.PermissionError) as permission,
+			self.assertRaises(frappe.PermissionError),
+		):
+			get_document_pages("ToDo", self.todo.name)
+		permission.assert_called_once_with("ToDo", "read", doc=self.todo.name, throw=True)
+		self.vision.assert_not_called()
+
+	def test_unreadable_file_records_an_error_and_fails_the_document(self):
+		file = self.attach(image_content(), "png")
+		self.vision.side_effect = RuntimeError("Local provider failure")
+		with self.assertRaisesRegex(ValueError, "Local provider failure"):
+			get_document_pages("ToDo", self.todo.name)
+		error = frappe.db.get_value("File", file.name, ["ai_page_error", "ai_page_attempts"], as_dict=True)
+		self.assertEqual(error.ai_page_attempts, 1)
+		self.assertIsNone(reader.read_file(file.name))
+		self.vision.assert_called_once()
+
+	def test_patch_moves_detail_page_data_to_its_file_once(self):
+		if not frappe.db.has_column(DETAIL, "ai_page_data"):
+			self.skipTest("Old detail columns are not on this site")
+		detail = frappe.get_doc({"doctype": DETAIL, "page_no": 1}).insert(ignore_mandatory=True)
+		file = self.attach(image_content(), "png", field="attachment", doctype=DETAIL, name=detail.name)
+		page = {**deepcopy(PAGE_SCHEMA), "page_no": 4, "document_number": self.prefix}
+		frappe.db.sql(
+			f"update `tab{DETAIL}` set attachment=%s, ai_page_data=%s, ai_page_data_attachment=%s where name=%s",
+			(file.file_url, frappe.as_json(page), file.file_url, detail.name),
+		)
+		with patch.object(move_scan_page_data_to_file, "create_file_fields"):
+			move_scan_page_data_to_file.execute()
+			stored = self.stored(file)
+			self.assertEqual(frappe.parse_json(stored.ai_page_data), {"pages": [{**page, "page_no": 1}]})
+			self.assertEqual(stored.ai_page_count, 1)
+			frappe.db.set_value("File", file.name, "ai_page_model", "local/kept")
+			move_scan_page_data_to_file.execute()
+		self.assertEqual(self.stored(file).ai_page_model, "local/kept")
+		self.vision.assert_not_called()

@@ -8,12 +8,19 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from frappe_tools.extractors.pipeline import file_to_data_url
+from frappe_tools.file_data import extraction
+from frappe_tools.file_data import reader as file_reader
+from frappe_tools.file_data.documents import files_by_url, files_for_document, get_document_pages
+from frappe_tools.file_data.extraction import PAGE_SCHEMA, extract_pages
+from frappe_tools.frappe_tools.doctype.document_extraction_settings.document_extraction_settings import (
+	DEFAULT_PROMPTS,
+)
 from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
 	scanned_document_ai_verifier as verifier,
 )
 from frappe_tools.scan_categorization import categorize as flow
+from frappe_tools.scan_categorization import decisions
 from frappe_tools.scan_categorization import page_data as reader
-from frappe_tools.scan_categorization.page_data import PAGE_SCHEMA, _extract_pages, get_page_data
 from frappe_tools.scan_categorization.test_rotation import page_image
 from frappe_tools.utils import llm, save_file_always_new
 
@@ -38,6 +45,14 @@ def page_data(number: int, **values) -> dict:
 	}
 
 
+def scan_data(call) -> dict:
+	return json.loads(call.args[2].split("Scan data (JSON):\n", 1)[1])
+
+
+def page_keys(call) -> list[str]:
+	return list(call.kwargs["schema"]["properties"])
+
+
 class TestCategorize(UnitTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
@@ -57,9 +72,12 @@ class TestCategorize(UnitTestCase):
 		self.vision = patch.object(llm, "call_vision", side_effect=self.read_image)
 		self.vision_mock = self.vision.start()
 		self.addCleanup(self.vision.stop)
-		self.http = patch("requests.post", side_effect=self.response)
+		self.http = patch("requests.post")
 		self.post = self.http.start()
 		self.addCleanup(self.http.stop)
+		self.decision = patch.object(decisions, "call_model", side_effect=self.decide)
+		self.model = self.decision.start()
+		self.addCleanup(self.decision.stop)
 		self.confidence, self.layout_confidence = 0.9, 0.95
 		self.prefix = "_Test Scan Local " + frappe.generate_hash(length=8)
 		# Insert a local-only source fixture without ERPNext's fiscal-year test loader.
@@ -99,14 +117,31 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(len(images), 1)
 		return {"data": {"pages": [{**self.pages[self.image_numbers[images[0]] - 1], "page_no": 1}]}}
 
+	def file(self, detail):
+		attachment = frappe.db.get_value(flow.DETAIL, detail.name, "attachment")
+		return files_by_url([attachment])[attachment]
+
+	def data(self, detail):
+		data = self.file(detail).ai_page_data
+		return frappe.parse_json(data) if data else None
+
+	def set_file(self, detail, values):
+		attachment = frappe.db.get_value(flow.DETAIL, detail.name, "attachment")
+		for name in frappe.get_all("File", filters={"file_url": attachment}, pluck="name"):
+			frappe.db.set_value("File", name, values, update_modified=False)
+
 	def store_pages(self, details):
 		for detail, page in zip(details, self.pages, strict=True):
-			attachment = frappe.db.get_value(flow.DETAIL, detail.name, "attachment")
-			frappe.db.set_value(flow.DETAIL, detail.name, reader.page_data_values(page, attachment), update_modified=False)
+			self.set_file(detail, file_reader.data_values({"pages": [{**page, "page_no": 1}]}, "local/test"))
 
 	def clear_pages(self, details):
 		for detail in details:
-			frappe.db.set_value(flow.DETAIL, detail.name, {"ai_page_data": None, "ai_page_data_attachment": None})
+			self.set_file(detail, {"ai_page_data": None})
+
+	def scan_pages(self, name):
+		pages, omitted = get_document_pages(flow.SCAN, name)
+		self.assertEqual(omitted, 0)
+		return pages
 
 	def returned(self, pages):
 		return [{**page, "page_no": number, "section": self.titles[0]} for number, page in enumerate(pages, 1)]
@@ -116,6 +151,7 @@ class TestCategorize(UnitTestCase):
 		details = []
 		for number in (1, 2):
 			image[0, 0] = [int(self.prefix[-6:-4], 16), int(self.prefix[-4:-2], 16), number]
+			image[0, 1] = [len(self.image_numbers) % 256, int(self.prefix[-2:], 16), 0]
 			page = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE) if number == 1 else image
 			content = cv2.imencode(".png", page)[1].tobytes()
 			details.append(frappe.get_doc({
@@ -129,14 +165,11 @@ class TestCategorize(UnitTestCase):
 			self.store_pages(details)
 		return details
 
-	def response(self, _url, **kwargs):
-		answers = {}
-		for key in kwargs["json"]["questions"]:
-			choice = self.layout.name if key == "layout" else self.titles[int(key.split("_")[1]) - 1]
-			answers[key] = {"type": "choice", "choice": choice, "confidence": self.layout_confidence if key == "layout" else self.confidence}
-		response = Mock(status_code=200)
-		response.json.return_value = {"answers": answers, "usage": {"input_tokens": 100, "cost": 0.002}}
-		return response
+	def decide(self, task, system_prompt, user_prompt, **kwargs):
+		keys = kwargs["schema"]["properties"]
+		if "layout" in keys:
+			return {"data": {"layout": self.layout.name, "confidence": self.layout_confidence, "reason": "Local test"}}
+		return {"data": {key: {"section": self.titles[int(key.split("_")[1]) - 1], "confidence": self.confidence} for key in keys}}
 
 	def test_applies_layout_sections_and_keeps_original(self):
 		original = self.details[0].attachment
@@ -160,18 +193,19 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(self.details[1].layout_type, "Series Vertical")
 		self.assertFalse(self.details[1].original_attachment)
 		self.vision_mock.assert_not_called()
-		self.assertEqual(self.post.call_count, 2)
-		state = self.post.call_args.kwargs["json"]["state"]
-		summaries = [{key: value for key, value in page.items() if key not in reader.RAW_FIELDS} for page in self.pages]
-		for call in self.post.call_args_list:
-			self.assertEqual(call.kwargs["json"]["state"]["pages"], summaries)
-		self.assertIn("full_text", frappe.parse_json(self.details[1].ai_page_data))
+		self.post.assert_not_called()
+		self.assertEqual(self.model.call_count, 2)
+		state = scan_data(self.model.call_args)
+		summaries = [{key: value for key, value in page.items() if key not in extraction.RAW_FIELDS} for page in self.pages]
+		for call in self.model.call_args_list:
+			self.assertEqual(call.args[0], "Scan Decision")
+			self.assertEqual(call.kwargs["target_doctype"], "Purchase Invoice")
+			self.assertEqual(scan_data(call)["pages"], summaries)
+		self.assertIn("full_text", self.data(self.details[1])["pages"][0])
+		self.assertEqual(self.data(self.details[0])["pages"], [{**self.pages[0], "rotation": 0, "page_no": 1}])
 		self.assertEqual(float(state["document"]["grand_total"]), 1250)
 		self.assertEqual(float(state["document"]["items"][0]["amount"]), 1250)
-		self.assertEqual(set(self.post.call_args.kwargs["json"]["questions"]), {"page_1", "page_2"})
-		logs = frappe.get_all("Document AI Call Log", filters={"model": "typesafe/jev-1.13", "request_payload": ["like", "%" + self.prefix + "%"]}, fields=["provider", "prompt_tokens", "cost_usd"])
-		self.assertEqual(len(logs), 2)
-		self.assertTrue(all(log.provider == "OpenRouter" and log.prompt_tokens == 100 and log.cost_usd == 0.002 for log in logs))
+		self.assertEqual(page_keys(self.model.call_args), ["page_1", "page_2"])
 
 	def test_low_page_confidence_changes_no_content(self):
 		self.confidence = 0.79
@@ -185,8 +219,8 @@ class TestCategorize(UnitTestCase):
 			detail.reload()
 			for key in ("attachment", "original_attachment", "title", "layout_type", "modified"):
 				self.assertEqual(detail.get(key), original[key])
-			self.assertTrue(detail.ai_page_data)
-			self.assertTrue(detail.ai_page_data_on)
+			self.assertTrue(self.data(detail))
+			self.assertTrue(frappe.db.get_value("File", self.file(detail).name, "ai_page_data_on"))
 
 	def test_external_calls_and_correction_precede_scan_locks_and_writes(self):
 		original_correction = flow.correct_image
@@ -198,15 +232,15 @@ class TestCategorize(UnitTestCase):
 						self.assertNotIn("for update", query)
 						self.assertFalse(query.lstrip().startswith(("update", "insert", "delete")), query)
 
-			def response(*args, **kwargs):
+			def decide(*args, **kwargs):
 				assert_unlocked()
-				return self.response(*args, **kwargs)
+				return self.decide(*args, **kwargs)
 
 			def correct(*args):
 				assert_unlocked()
 				return original_correction(*args)
 
-			self.post.side_effect = response
+			self.model.side_effect = decide
 			with patch.object(flow, "correct_image", side_effect=correct):
 				flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 			queries = [str(call.args[0]).lower() for call in sql.call_args_list]
@@ -237,11 +271,11 @@ class TestCategorize(UnitTestCase):
 		for label, change in changes.items():
 			with self.subTest(change=label):
 				frappe.db.savepoint("concurrent_change")
-				def response(*args, **kwargs):
-					if "page_1" in kwargs["json"]["questions"]:
+				def decide(*args, **kwargs):
+					if "page_1" in kwargs["schema"]["properties"]:
 						change()
-					return self.response(*args, **kwargs)
-				self.post.side_effect = response
+					return self.decide(*args, **kwargs)
+				self.model.side_effect = decide
 				with patch.object(flow, "_apply") as apply:
 					flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 				apply.assert_not_called()
@@ -256,7 +290,7 @@ class TestCategorize(UnitTestCase):
 					self.assertEqual(outcome["status"], self.scan.ai_check_status)
 					self.assertFalse(outcome["applied"])
 				self.assertEqual(self.scan.ai_reviewed, int(label == "reviewed"))
-				self.assertTrue(self.details[1].reload().ai_page_data)
+				self.assertTrue(self.data(self.details[1]))
 				self.assertEqual(self.details[1].title, self.titles[0])
 				frappe.db.rollback(save_point="concurrent_change")
 				self.scan.reload()
@@ -276,10 +310,10 @@ class TestCategorize(UnitTestCase):
 		replies = iter([{"data": {"pages": [page_data(2)]}}, {"data": {"pages": [page_data(1)]}}])
 		self.vision_mock.side_effect = lambda *args, **kwargs: next(replies)
 		reader.extract_scan_pages(self.scan.name)
-		self.assertFalse(self.details[0].reload().ai_page_data)
-		self.assertIn("every page exactly once", self.details[0].ai_page_error)
-		self.assertEqual(self.details[1].reload().ai_page_data_attachment, self.details[1].attachment)
-		self.assertFalse(self.details[1].ai_page_error)
+		self.assertFalse(self.data(self.details[0]))
+		self.assertIn("every page exactly once", self.file(self.details[0]).ai_page_error)
+		self.assertTrue(self.data(self.details[1]))
+		self.assertFalse(self.file(self.details[1]).ai_page_error)
 
 		reader.extract_scan_pages(self.scan.name)
 		self.assertEqual(self.vision_mock.call_count, 2)
@@ -292,7 +326,7 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(self.scan.reload().ai_check_status, "Done", self.scan.ai_error)
 		for detail, title in zip(self.details, self.titles, strict=True):
 			self.assertEqual(detail.reload().title, title)
-		self.assertEqual(list(self.post.call_args.kwargs["json"]["questions"]), ["page_1", "page_2"])
+		self.assertEqual(page_keys(self.model.call_args), ["page_1", "page_2"])
 
 	def test_corrected_jpeg_attachment_and_cache_keep_format(self):
 		content = cv2.imencode(".jpg", cv2.rotate(page_image(), cv2.ROTATE_90_COUNTERCLOCKWISE))[1].tobytes()
@@ -306,7 +340,7 @@ class TestCategorize(UnitTestCase):
 		self.assertTrue(detail.attachment.endswith(".jpg"))
 		file = frappe.get_doc("File", {"file_url": detail.attachment})
 		self.assertTrue(file.get_content().startswith(b"\xff\xd8\xff"))
-		self.assertEqual(get_page_data(self.scan.name)[0]["rotation"], 0)
+		self.assertEqual(self.scan_pages(self.scan.name)[0]["rotation"], 0)
 		self.vision_mock.assert_not_called()
 
 	def test_low_layout_confidence_and_exact_threshold(self):
@@ -319,13 +353,12 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(self.scan.reload().ai_check_status, "Done")
 
 	def test_failure_records_error_and_does_not_escape(self):
-		self.post.side_effect = RuntimeError("Local simulated API failure")
+		self.model.side_effect = RuntimeError("Local simulated API failure")
 		with patch.object(frappe, "log_error") as log:
 			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Failed")
 		self.assertIn("simulated API failure", self.scan.ai_error)
 		log.assert_called_once()
-		self.assertTrue(frappe.db.exists("Document AI Call Log", {"model": "typesafe/jev-1.13", "status": "Error"}))
 
 	def test_partial_application_is_rolled_back(self):
 		original = self.details[0].attachment
@@ -355,19 +388,19 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(outcome["status"], "Failed")
 		self.assertFalse(outcome["applied"])
 		self.assertTrue(all(page["corrected_file"] is None and page["deskew_angle"] == 0 for page in outcome["pages"]))
-		self.assertEqual([page["rotation"] for page in get_page_data(self.scan.name)], [180, 0])
+		self.assertEqual([page["rotation"] for page in self.scan_pages(self.scan.name)], [180, 0])
 		self.vision_mock.assert_not_called()
 
 	def test_review_and_completed_jobs_are_never_overwritten(self):
 		flow.mark_reviewed(self.scan.name)
 		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertFalse(flow.run_ai_check(self.scan.name)["queued"])
-		self.post.assert_not_called()
+		self.model.assert_not_called()
 		self.assertEqual(self.scan.reload().ai_reviewed, 1)
 		for status in ("Done", "Needs Review", "Failed", ""):
 			frappe.db.set_value(flow.SCAN, self.scan.name, {"ai_reviewed": 0, "ai_check_status": status})
 			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
-		self.post.assert_not_called()
+		self.model.assert_not_called()
 
 	def test_nightly_date_limit_deleted_reviewed_and_dedup(self):
 		self.settings.ai_process_since = "2099-01-01"
@@ -439,7 +472,7 @@ class TestCategorize(UnitTestCase):
 			with self.subTest(pages=pages):
 				self.vision_mock.return_value = {"data": {"pages": pages}}
 				with self.assertRaises(ValueError):
-					_extract_pages(["image"], target_doctype="Purchase Invoice")
+					extract_pages(["image"], target_doctype="Purchase Invoice")
 
 	def test_vision_prompt_and_full_response(self):
 		self.vision_mock.side_effect = None
@@ -448,13 +481,14 @@ class TestCategorize(UnitTestCase):
 		blank = {key: None for key in PAGE_SCHEMA}
 		blank.update(page_no=2, rotation=0, is_blank_or_unreadable=True)
 		self.vision_mock.return_value = {"data": {"pages": [full, blank]}}
-		self.assertEqual(_extract_pages(["one", "two"], target_doctype="Purchase Invoice"), [full, blank])
+		self.assertEqual(extract_pages(["one", "two"], target_doctype="Purchase Invoice"), ([full, blank], None))
 		args = self.vision_mock.call_args
 		self.assertEqual(args.args[0], ["one", "two"])
 		self.assertEqual(args.kwargs["target_doctype"], "Purchase Invoice")
 		self.assertIn("WHOLE content", args.args[1])
-		self.assertIn("exactly as printed", args.args[2])
-		self.assertEqual(args.kwargs["min_output_tokens"], reader.PAGE_OUTPUT_TOKENS)
+		self.assertIn("exactly as printed", args.args[1])
+		self.assertTrue(args.args[1].endswith(extraction.PAGE_SAFETY_RULES))
+		self.assertEqual(args.kwargs["min_output_tokens"], extraction.PAGE_OUTPUT_TOKENS)
 		for field in PAGE_SCHEMA:
 			self.assertIn(field, args.args[2])
 
@@ -466,10 +500,10 @@ class TestCategorize(UnitTestCase):
 			with self.subTest(data=data):
 				self.vision_mock.return_value = {"data": data}
 				with self.assertRaisesRegex(ValueError, "could not be read"):
-					get_page_data(self.scan.name)
+					self.scan_pages(self.scan.name)
 				for detail in self.details:
-					self.assertFalse(detail.reload().ai_page_data)
-					self.assertTrue(detail.ai_page_error)
+					self.assertFalse(self.data(detail))
+					self.assertTrue(self.file(detail).ai_page_error)
 
 	def test_schema_keeps_full_text_and_printed_item_table(self):
 		for key in ("full_text", "handwritten", "language", "confidence_notes"):
@@ -477,7 +511,7 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(set(PAGE_SCHEMA["item_table"]), {"columns", "rows"})
 		for table in ({"columns": ["Qty"]}, {"columns": ["Qty"], "rows": ["5"]}, []):
 			with self.subTest(table=table), self.assertRaises(ValueError):
-				reader._validate_pages([page_data(1, item_table=table)], 1)
+				extraction._validate_pages([page_data(1, item_table=table)], 1)
 
 	def test_truncated_response_saves_error_not_partial_data(self):
 		self.clear_pages(self.details[:1])
@@ -489,40 +523,43 @@ class TestCategorize(UnitTestCase):
 		self.post.side_effect = None
 		self.post.return_value = response
 		with patch.object(llm, "ensure_ready", return_value=settings), self.assertRaises(ValueError):
-			get_page_data(self.scan.name)
-		self.assertFalse(self.details[0].reload().ai_page_data)
-		self.assertIn("finish_reason=length", self.details[0].ai_page_error)
+			self.scan_pages(self.scan.name)
+		self.assertFalse(self.data(self.details[0]))
+		self.assertIn("finish_reason=length", self.file(self.details[0]).ai_page_error)
 
 	def test_each_page_is_read_once_in_its_own_call_and_saved(self):
 		self.clear_pages(self.details)
-		pages = get_page_data(self.scan.name)
+		pages = self.scan_pages(self.scan.name)
 		self.assertEqual(pages, self.returned(self.pages))
 		self.assertEqual(self.vision_mock.call_count, 2)
 		for call in self.vision_mock.call_args_list:
 			self.assertEqual(call.kwargs["phase"], "Page Extraction")
 			self.assertEqual(call.kwargs["reference_name"], self.scan.name)
 		for page, detail in zip(self.pages, self.details, strict=True):
-			detail.reload()
-			self.assertEqual(frappe.parse_json(detail.ai_page_data), {**page, "page_no": 1})
-			self.assertEqual(detail.ai_page_data_attachment, detail.attachment)
-			self.assertTrue(detail.ai_page_data_on)
-		self.assertEqual(get_page_data(self.scan.name), pages)
+			file = self.file(detail)
+			self.assertEqual(frappe.parse_json(file.ai_page_data), {"pages": [{**page, "page_no": 1}]})
+			self.assertEqual(file.ai_page_count, 1)
+			self.assertTrue(frappe.db.get_value("File", file.name, "ai_page_data_on"))
+		self.assertEqual(self.scan_pages(self.scan.name), pages)
 		self.assertEqual(self.vision_mock.call_count, 2)
 		self.post.assert_not_called()
 
-	def test_read_holds_no_lock_during_vision_and_skips_a_replaced_page(self):
+	def test_read_holds_no_lock_during_vision_and_skips_a_changed_file(self):
 		self.clear_pages(self.details)
+		file = self.file(self.details[0])
 		with patch.object(frappe.db, "sql", wraps=frappe.db.sql) as sql:
 			def vision(images, *args, **kwargs):
 				queries = [str(call.args[0]).lower() for call in sql.call_args_list]
 				self.assertFalse([query for query in queries if "for update" in query or query.lstrip().startswith("update")])
-				frappe.db.set_value(flow.DETAIL, self.details[0].name, "attachment", "/private/files/local-replaced.png")
+				frappe.db.set_value("File", file.name, "content_hash", "local-replaced-hash")
 				return self.read_image(images)
 
 			self.vision_mock.side_effect = vision
-			reader.read_page(frappe._dict(name=self.scan.name, _doctype="Purchase Invoice"), self.details[0])
-		self.assertFalse(self.details[0].reload().ai_page_data)
-		self.assertFalse(self.details[0].ai_page_error)
+			self.assertIsNone(file_reader.read_file(file.name))
+			queries = [str(call.args[0]).lower() for call in sql.call_args_list]
+			self.assertTrue(any("tabfile`" in query and "for update" in query for query in queries))
+		self.assertFalse(frappe.db.get_value("File", file.name, "ai_page_data"))
+		self.assertFalse(frappe.db.get_value("File", file.name, "ai_page_error"))
 
 	def test_stored_data_is_kept_when_categorization_needs_review(self):
 		self.clear_pages(self.details)
@@ -530,7 +567,7 @@ class TestCategorize(UnitTestCase):
 		self.layout_confidence = 0.1
 		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
-		self.assertEqual(get_page_data(self.scan.name), self.returned(self.pages))
+		self.assertEqual(self.scan_pages(self.scan.name), self.returned(self.pages))
 		self.assertEqual(self.vision_mock.call_count, 2)
 
 	def test_vision_uses_json_mode_and_logs_full_response(self):
@@ -546,13 +583,14 @@ class TestCategorize(UnitTestCase):
 		self.post.side_effect = None
 		self.post.return_value = response
 		with patch.object(llm, "ensure_ready", return_value=settings):
-			self.assertEqual(get_page_data(self.scan.name), self.returned(self.pages))
+			self.assertEqual(self.scan_pages(self.scan.name), self.returned(self.pages))
 		self.post.assert_called_once()
+		self.assertEqual(self.file(self.details[0]).ai_page_model, "OpenRouter/local/test-vision")
 		body = self.post.call_args.kwargs["json"]
 		self.assertEqual(body["response_format"], {"type": "json_object"})
 		self.assertEqual(body["max_tokens"], 16000)
 		self.assertEqual(len(body["messages"][1]["content"]), 2)
-		log = frappe.get_last_doc("Document AI Call Log", filters={"model": "local/test-vision"})
+		log = frappe.get_last_doc("Document AI Call Log", filters={"model": "OpenRouter/local/test-vision"})
 		self.assertEqual(log.status, "Success")
 		self.assertEqual(log.total_tokens, 400)
 		self.assertEqual(json.loads(log.raw_response)["pages"], self.pages[:1])
@@ -562,10 +600,11 @@ class TestCategorize(UnitTestCase):
 		file = save_file_always_new(f"{self.prefix}-new.png", content, flow.DETAIL, self.details[1].name, is_private=1)
 		self.image_numbers[file_to_data_url(file.file_url)] = 2
 		frappe.db.set_value(flow.DETAIL, self.details[1].name, "attachment", file.file_url)
-		self.assertEqual(get_page_data(self.scan.name), self.returned(self.pages))
+		self.assertEqual(self.scan_pages(self.scan.name), self.returned(self.pages))
 		self.vision_mock.assert_called_once()
-		self.assertEqual(self.details[1].reload().ai_page_data_attachment, file.file_url)
-		get_page_data(self.scan.name)
+		self.assertEqual(self.file(self.details[1]).file_url, file.file_url)
+		self.assertTrue(self.data(self.details[1]))
+		self.scan_pages(self.scan.name)
 		self.vision_mock.assert_called_once()
 
 	def test_same_attachment_is_copied_without_vision(self):
@@ -575,36 +614,42 @@ class TestCategorize(UnitTestCase):
 			frappe.db.set_value(flow.DETAIL, copy.name, "attachment", detail.attachment)
 		reader.extract_scan_pages(scan.name)
 		self.vision_mock.assert_not_called()
-		for copy, page in zip(copies, self.pages, strict=True):
-			copy.reload()
-			self.assertEqual(frappe.parse_json(copy.ai_page_data), page)
-			self.assertEqual(copy.ai_page_data_attachment, copy.attachment)
+		self.assertFalse(reader.has_unread_pages(scan.name))
+		self.assertEqual(self.scan_pages(scan.name), self.returned(self.pages))
 
 	def test_reordering_stored_pages_updates_indices_without_vision(self):
 		frappe.db.set_value(flow.DETAIL, self.details[0].name, "page_no", 3)
-		pages = get_page_data(self.scan.name)
+		pages = self.scan_pages(self.scan.name)
 		self.assertEqual([p["page_no"] for p in pages], [1, 2])
 		self.assertEqual(pages[0]["document_type"], "Delivery Challan")
 		self.vision_mock.assert_not_called()
 
+	def test_scan_pages_follow_page_order_with_sections(self):
+		frappe.db.set_value(flow.DETAIL, self.details[0].name, {"page_no": 3, "title": self.titles[1]})
+		pages = self.scan_pages(self.scan.name)
+		self.assertEqual([(page["page_no"], page["section"], page["document_type"]) for page in pages],
+			[(1, self.titles[0], "Delivery Challan"), (2, self.titles[1], "Tax Invoice")])
+		self.assertEqual(files_for_document(flow.SCAN, self.scan.name),
+			[self.file(detail).name for detail in reversed(self.details)])
+
 	def test_empty_scan_returns_no_pages(self):
-		self.assertEqual(get_page_data(self.new_scan().name), [])
+		self.assertEqual(get_document_pages(flow.SCAN, self.new_scan().name), ([], 0))
 		self.vision_mock.assert_not_called()
 
-	def test_page_data_needs_print_permission_on_linked_document(self):
+	def test_page_data_needs_read_permission_on_linked_document(self):
 		with (
 			patch.object(frappe, "has_permission", side_effect=frappe.PermissionError) as permission,
 			self.assertRaises(frappe.PermissionError),
 		):
-			get_page_data(self.scan.name)
-		permission.assert_called_once_with("Purchase Invoice", "print", doc=self.bill.name, throw=True)
+			self.scan_pages(self.scan.name)
+		permission.assert_called_once_with("Purchase Invoice", "read", doc=self.bill.name, throw=True)
 		self.vision_mock.assert_not_called()
 
 	def test_deleted_pages_are_not_used(self):
 		frappe.db.set_value(flow.DETAIL, self.details[1].name, "is_deleted", 1)
 		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done")
-		self.assertEqual(list(self.post.call_args.kwargs["json"]["questions"]), ["page_1"])
+		self.assertEqual(page_keys(self.model.call_args), ["page_1"])
 		self.assertEqual(self.details[1].reload().title, self.titles[0])
 		self.vision_mock.assert_not_called()
 
@@ -615,7 +660,7 @@ class TestCategorize(UnitTestCase):
 		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done")
 		self.assertEqual(self.details[0].reload().original_attachment, original)
-		self.assertEqual([page["rotation"] for page in get_page_data(self.scan.name)], [0, 0])
+		self.assertEqual([page["rotation"] for page in self.scan_pages(self.scan.name)], [0, 0])
 		self.vision_mock.assert_not_called()
 
 	def test_categorization_skips_scans_with_unread_pages(self):
@@ -638,6 +683,7 @@ class TestCategorize(UnitTestCase):
 		self.assertIn("not read yet", self.scan.ai_error)
 		self.vision_mock.assert_not_called()
 		self.post.assert_not_called()
+		self.model.assert_not_called()
 
 	def test_hourly_extraction_selects_unread_pages_up_to_limit(self):
 		settings = frappe._dict(enable_page_extraction=1, page_extraction_batch_limit=2,
@@ -651,7 +697,7 @@ class TestCategorize(UnitTestCase):
 		self.add_pages(self.new_scan(creation="2099-01-01"))
 		failed = self.new_scan(creation="2099-01-01")
 		for detail in self.add_pages(failed, read=False):
-			frappe.db.set_value(flow.DETAIL, detail.name, {"ai_page_error": "Local read failed",
+			self.set_file(detail, {"ai_page_error": "Local read failed",
 				"ai_page_error_on": frappe.utils.now_datetime(), "ai_page_attempts": 1})
 		deleted = self.new_scan(creation="2099-01-01")
 		for detail in self.add_pages(deleted, read=False):
@@ -674,7 +720,7 @@ class TestCategorize(UnitTestCase):
 		self.vision_mock.assert_not_called()
 
 	def fail_page(self, attempts, hours_ago):
-		frappe.db.set_value(flow.DETAIL, self.details[0].name, {
+		self.set_file(self.details[0], {
 			"ai_page_data": None, "ai_page_error": "Local read failed", "ai_page_attempts": attempts,
 			"ai_page_error_on": frappe.utils.add_to_date(frappe.utils.now_datetime(), hours=-hours_ago),
 		})
@@ -687,9 +733,9 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(self.selected(), 1)
 		reader.extract_scan_pages(self.scan.name)
 		self.vision_mock.assert_called_once()
-		detail = self.details[0].reload()
-		self.assertTrue(detail.ai_page_data)
-		self.assertEqual((detail.ai_page_attempts, detail.ai_page_error, detail.ai_page_error_on), (0, None, None))
+		file = self.file(self.details[0])
+		self.assertTrue(file.ai_page_data)
+		self.assertEqual((file.ai_page_attempts, file.ai_page_error, file.ai_page_error_on), (0, None, None))
 
 	def test_failed_page_is_not_retried_before_delay(self):
 		self.fail_page(attempts=1, hours_ago=5)
@@ -701,9 +747,9 @@ class TestCategorize(UnitTestCase):
 		self.fail_page(attempts=2, hours_ago=7)
 		self.vision_mock.side_effect = RuntimeError("Local provider failure")
 		reader.extract_scan_pages(self.scan.name)
-		detail = self.details[0].reload()
-		self.assertEqual(detail.ai_page_attempts, 3)
-		self.assertIn("Local provider failure", detail.ai_page_error)
+		file = self.file(self.details[0])
+		self.assertEqual(file.ai_page_attempts, 3)
+		self.assertIn("Local provider failure", file.ai_page_error)
 		self.fail_page(attempts=3, hours_ago=7)
 		self.assertEqual(self.selected(), 0)
 		reader.extract_scan_pages(self.scan.name)
@@ -713,7 +759,7 @@ class TestCategorize(UnitTestCase):
 		self.fail_page(attempts=3, hours_ago=0)
 		reader.extract_scan_pages(self.scan.name, retry_failed=True)
 		self.vision_mock.assert_called_once()
-		self.assertEqual(self.details[0].reload().ai_page_attempts, 0)
+		self.assertEqual(self.file(self.details[0]).ai_page_attempts, 0)
 
 	def test_read_pages_now_needs_scan_permission_and_dedups(self):
 		with (
@@ -733,12 +779,12 @@ class TestCategorize(UnitTestCase):
 
 	def test_verifier_uses_stored_pages_and_reads_only_missing_ones(self):
 		self.clear_pages(self.details[1:])
-		pages, omitted = verifier._load_pages([self.scan.name])
+		pages, omitted = verifier._load_pages("Purchase Invoice", self.bill.name, [self.scan.name])
 		self.assertEqual(omitted, 0)
 		self.assertEqual(pages, [{"scanned_document": self.scan.name, **page} for page in self.returned(self.pages)])
 		self.vision_mock.assert_called_once()
 		self.assertEqual(self.vision_mock.call_args.args[0], [file_to_data_url(self.details[1].attachment)])
-		verifier._load_pages([self.scan.name])
+		verifier._load_pages("Purchase Invoice", self.bill.name, [self.scan.name])
 		self.vision_mock.assert_called_once()
 
 	def test_missing_layout_fails_without_vision(self):
@@ -801,7 +847,7 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(outcome["threshold"], 0.8)
 		self.assertEqual(outcome["layout"], self.layout.name)
 		self.assertEqual(outcome["layout_confidence"], 0.95)
-		self.assertIsNone(outcome["layout_probabilities"])
+		self.assertNotIn("layout_probabilities", outcome)
 		self.assertEqual(outcome["reason"], "")
 		for index, (page, detail) in enumerate(zip(outcome["pages"], self.details, strict=True)):
 			original = detail.attachment
@@ -812,13 +858,14 @@ class TestCategorize(UnitTestCase):
 				"deskew_angle": 0.0, "corrected_file": detail.attachment if index == 0 else None,
 				"original_attachment": original,
 			})
+		context = {"reference_doctype": flow.SCAN, "reference_name": self.scan.name, "run_id": log.run_id}
+		self.assertEqual([call.kwargs["phase"] for call in self.model.call_args_list], ["Layout Decision", "Section Decision"])
+		for call in self.model.call_args_list:
+			self.assertEqual({key: call.kwargs[key] for key in context}, context)
 		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={"run_id": log.run_id},
 			fields=["phase", "reference_doctype", "reference_name"])
-		self.assertCountEqual([row.phase for row in logs], [
-			"Layout Decision", "Section Decision", "Categorization Outcome",
-		])
-		for row in logs:
-			self.assertEqual((row.reference_doctype, row.reference_name), (flow.SCAN, self.scan.name))
+		self.assertEqual([(row.phase, row.reference_doctype, row.reference_name) for row in logs],
+			[("Categorization Outcome", flow.SCAN, self.scan.name)])
 
 	def test_review_outcome_preserves_proposals_without_corrections(self):
 		self.confidence = 0.7
@@ -838,7 +885,7 @@ class TestCategorize(UnitTestCase):
 			self.assertEqual(page["deskew_angle"], 0.0)
 
 	def test_failed_outcome_is_logged_once(self):
-		self.post.side_effect = RuntimeError("Local provider failure")
+		self.model.side_effect = RuntimeError("Local provider failure")
 		with patch.object(frappe, "log_error"):
 			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		_log, outcome = self.outcome()
@@ -859,7 +906,9 @@ class TestCategorize(UnitTestCase):
 			"prompt": "Compare total quantity with the scanned quantity.", "max_documents": 1,
 		}).insert()
 		self.vision.stop()
-		settings = frappe._dict(model="local/test-verifier", max_attempts=1, get_api_key=lambda: "local-test-key")
+		settings = frappe.get_single("Document Extraction Settings")
+		settings.update(dict(enable=1, model="local/test-verifier", max_attempts=1, task_models=[]))
+		self.enterContext(patch.object(settings, "get_api_key", return_value="local-test-key"))
 		responses = []
 		for data in ({"columns": [{"key": "quantity", "label": "Quantity"}]},
 			{"values": {"quantity": 5}, "remarks": "Matches"}):
@@ -878,10 +927,10 @@ class TestCategorize(UnitTestCase):
 		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={
 			"reference_doctype": verifier.DOCTYPE, "reference_name": doc.name,
 		}, fields=["phase", "run_id", "request_payload", "provider"])
-		self.assertCountEqual([log.phase for log in logs], ["Verifier Columns", "Verifier Row", "Verifier Row"])
+		self.assertCountEqual([log.phase for log in logs], ["Verifier Columns", "Verifier Agent Step", "Verifier Row"])
 		for log in logs:
 			self.assertEqual(log.run_id, doc.last_run_id)
-			if log.phase == "Verifier Row" and log.provider != "frappe_tools":
+			if log.phase == "Verifier Agent Step":
 				payload = json.loads(log.request_payload)
 				evidence = json.loads(payload["messages"][1]["content"][0]["text"])
 				self.assertEqual(evidence["document"]["name"], self.bill.name)
@@ -906,10 +955,10 @@ class TestCategorize(UnitTestCase):
 		context = {"phase": "Page Extraction", "reference_doctype": flow.SCAN,
 			"reference_name": self.scan.name, "run_id": frappe.generate_hash(length=12)}
 		self.post.side_effect = [response, requests.Timeout("Local timeout"), response]
-		with patch.object(llm, "ensure_ready", return_value=settings), patch.object(llm.time, "sleep"):
+		with patch.object(llm, "ensure_ready", return_value=settings), patch("frappe_tools.ai.client.time.sleep"):
 			self.assertEqual(llm.call_vision([], "Read", "Quantity")["data"], {"quantity": 5})
 			self.assertEqual(llm.call_vision([], "Read", "Quantity", **context)["data"], {"quantity": 5})
-		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={"model": settings.model},
+		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={"model": f"OpenRouter/{settings.model}"},
 			fields=["phase", "reference_doctype", "reference_name", "run_id", "status"], order_by="creation asc")
 		self.assertEqual(len(logs), 3)
 		self.assertTrue(all(not logs[0][key] for key in context))
@@ -917,19 +966,10 @@ class TestCategorize(UnitTestCase):
 		for row in logs[1:]:
 			self.assertEqual({key: row[key] for key in context}, context)
 
-	def test_outcome_records_probabilities_and_applied_deskew(self):
-		probabilities = {self.layout.name: 0.95}
-		def response(*args, **kwargs):
-			result = self.response(*args, **kwargs)
-			if "layout" in result.json.return_value["answers"]:
-				result.json.return_value["answers"]["layout"]["probabilities"] = probabilities
-			return result
-
-		self.post.side_effect = response
+	def test_outcome_records_applied_deskew(self):
 		with patch("frappe_tools.scan_categorization.rotation.detect_skew", return_value=2.5):
 			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		_log, outcome = self.outcome()
-		self.assertEqual(outcome["layout_probabilities"], probabilities)
 		self.assertEqual(outcome["status"], "Done")
 		self.assertTrue(all(page["deskew_angle"] == 2.5 and page["corrected_file"] for page in outcome["pages"]))
 
@@ -967,8 +1007,8 @@ class TestCategorize(UnitTestCase):
 		new_run = frappe.generate_hash(length=16)
 		def replace_run(*args, **kwargs):
 			frappe.db.set_value(flow.SCAN, self.scan.name, {"ai_run_id": new_run, "ai_error": "new run"})
-			return self.response(*args, **kwargs)
-		self.post.side_effect = replace_run
+			return self.decide(*args, **kwargs)
+		self.model.side_effect = replace_run
 		flow.categorize_scan(self.scan.name, old_run)
 		self.assertEqual(self.scan.reload().ai_check_status, "Queued")
 		self.assertEqual(self.scan.ai_error, "new run")
@@ -976,9 +1016,9 @@ class TestCategorize(UnitTestCase):
 		self.assertFalse(frappe.db.exists("Document AI Call Log", {
 			"reference_name": self.scan.name, "phase": "Categorization Outcome", "run_id": old_run,
 		}))
-		self.post.reset_mock()
+		self.model.reset_mock()
 		flow.categorize_scan(self.scan.name, old_run)
-		self.post.assert_not_called()
+		self.model.assert_not_called()
 
 	def test_expired_queue_recovery_manual_and_nightly(self):
 		from frappe.utils import add_to_date, now_datetime
@@ -1005,17 +1045,18 @@ class TestCategorize(UnitTestCase):
 		self.assertIn("2 pages", self.scan.ai_error)
 		self.vision_mock.assert_not_called()
 		self.post.assert_not_called()
+		self.model.assert_not_called()
 
 	def test_section_positions_match_scanner_shapes(self):
 		for kind in ("Series Vertical", "Front And Back Vertical", "Front And Back Horizontal"):
 			with self.subTest(kind=kind):
-				answers = {f"page_{i}": {"choice": "section"} for i in range(1, 5)}
-				positions, reason = flow._positions({"section": kind}, answers)
+				titles = ["section"] * 4
+				positions, reason = flow._positions({"section": kind}, titles)
 				self.assertFalse(reason)
 				paired = kind.startswith("Front And Back")
 				self.assertEqual([p["page_no"] for p in positions], [1, 1, 2, 2] if paired else [1, 2, 3, 4])
 				self.assertEqual([p["page_type"] for p in positions], ["Front", "Back"] * 2 if paired else ["Front"] * 4)
-		positions, reason = flow._positions({"section": "Single Page"}, answers)
+		positions, reason = flow._positions({"section": "Single Page"}, titles)
 		self.assertFalse(positions)
 		self.assertIn("only one page", reason)
 
@@ -1050,12 +1091,12 @@ class TestCategorize(UnitTestCase):
 
 	def test_single_page_overflow_does_not_apply(self):
 		def choose_single(*args, **kwargs):
-			response = self.response(*args, **kwargs)
-			for key, answer in response.json.return_value["answers"].items():
+			result = self.decide(*args, **kwargs)
+			for key, answer in result["data"].items():
 				if key.startswith("page_"):
-					answer["choice"] = self.titles[0]
-			return response
-		self.post.side_effect = choose_single
+					answer["section"] = self.titles[0]
+			return result
+		self.model.side_effect = choose_single
 		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
 		self.assertIn("only one page", self.scan.ai_error)
@@ -1074,17 +1115,22 @@ class TestCategorize(UnitTestCase):
 			self.assertTrue(flow.run_ai_check(self.scan.name)["queued"])
 		self.assertEqual(events, ["commit", "enqueue", "commit"])
 
-	def test_decision_criteria_name_layout_and_sections(self):
+	def test_decision_prompts_and_schemas_name_layout_and_sections(self):
 		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
-		layout_question = self.post.call_args_list[0].kwargs["json"]["questions"]["layout"]
-		criterion = layout_question["criteria"][self.layout.name]
-		self.assertIn(f"Layout '{self.layout.name}' for Purchase Invoice", criterion)
-		self.assertIn(f"{self.titles[0]} (Single Page)", criterion)
-		self.assertIn(f"{self.titles[1]} (Series Vertical)", criterion)
-		page_question = self.post.call_args.kwargs["json"]["questions"]["page_2"]
-		self.assertIn("state.pages[1]", page_question["instructions"])
-		self.assertEqual(page_question["criteria"][self.titles[1]],
-			f"Section '{self.titles[1]}' of layout '{self.layout.name}'. Shape: Series Vertical (several pages in order)")
+		layout_call, section_call = self.model.call_args_list
+		self.assertIn("not instructions", layout_call.args[1])
+		self.assertIn(f"Layout '{self.layout.name}' for Purchase Invoice", layout_call.args[2])
+		self.assertIn(f"{self.titles[0]} (Single Page)", layout_call.args[2])
+		self.assertIn(f"{self.titles[1]} (Series Vertical)", layout_call.args[2])
+		self.assertIn(self.layout.name, layout_call.kwargs["schema"]["properties"]["layout"]["enum"])
+		self.assertEqual(layout_call.kwargs["phase"], "Layout Decision")
+		self.assertIn(f"'{self.titles[1]}': Series Vertical (several pages in order)", section_call.args[2])
+		self.assertEqual(section_call.kwargs["phase"], "Section Decision")
+		self.assertEqual(scan_data(section_call)["layout"], self.layout.name)
+		page = section_call.kwargs["schema"]["properties"]["page_2"]
+		self.assertEqual(page["properties"]["section"]["enum"], self.titles)
+		self.assertEqual(page["required"], ["section", "confidence"])
+		self.assertFalse(page["additionalProperties"])
 
 	def test_nightly_continues_after_a_queue_failure(self):
 		self.settings.ai_process_since = "2099-01-01"
@@ -1096,3 +1142,135 @@ class TestCategorize(UnitTestCase):
 		):
 			self.assertEqual(flow.enqueue_nightly(), 1)
 		log.assert_called_once()
+
+
+class TestDecisions(UnitTestCase):
+	def setUp(self):
+		self.layouts = {"Bill": [{"title": "Invoice", "layout_type": "Single Page"}]}
+		self.sections = {"Invoice": "Single Page", "Receipt": "Series Vertical"}
+		self.answer = {"layout": "Bill", "confidence": 0.91, "reason": "Tax invoice"}
+		self.patch = patch.object(decisions, "call_model", return_value={"data": self.answer})
+		self.model = self.patch.start()
+		self.addCleanup(self.patch.stop)
+
+	def sections_reply(self, *answers):
+		self.model.return_value = {"data": {f"page_{i}": answer for i, answer in enumerate(answers, 1)}}
+
+	def test_layout_request_and_answer(self):
+		context = {"reference_doctype": "Scanned Document", "reference_name": "LOCAL-SCAN", "run_id": "local-run-id"}
+		answer = decisions.decide_layout({"bill_no": "LOCAL-42"}, self.layouts, "Purchase Invoice", **context)
+		self.assertEqual(answer, self.answer)
+		call = self.model.call_args
+		self.assertEqual(call.args[0], "Scan Decision")
+		self.assertEqual(call.args[1], f"{DEFAULT_PROMPTS['Scan Decision']}\n\n{decisions.DECISION_RULES}")
+		self.assertEqual(scan_data(call), {"bill_no": "LOCAL-42"})
+		self.assertEqual(call.kwargs, {**context, "phase": "Layout Decision", "target_doctype": "Purchase Invoice",
+			"schema": call.kwargs["schema"]})
+		schema = call.kwargs["schema"]
+		self.assertEqual(schema["properties"]["layout"]["enum"], ["Bill"])
+		self.assertEqual(schema["required"], ["layout", "confidence", "reason"])
+		self.assertFalse(schema["additionalProperties"])
+
+	def test_section_answers_follow_page_order(self):
+		self.sections_reply({"section": "Invoice", "confidence": 1}, {"section": "Receipt", "confidence": 0.5})
+		answers = decisions.decide_sections({"pages": [{}, {}]}, "Bill", self.sections, "Purchase Invoice")
+		self.assertEqual(answers, [{"section": "Invoice", "confidence": 1}, {"section": "Receipt", "confidence": 0.5}])
+		self.assertEqual(page_keys(self.model.call_args), ["page_1", "page_2"])
+
+	def test_invalid_layout_answers_fail_closed(self):
+		for answer in ({}, [], {**self.answer, "layout": "Other"}, {**self.answer, "layout": ["Bill"]},
+			{**self.answer, "confidence": -1}, {**self.answer, "confidence": 1.01},
+			{**self.answer, "confidence": float("nan")}, {**self.answer, "confidence": True},
+			{**self.answer, "confidence": "0.9"}, {**self.answer, "reason": None}):
+			with self.subTest(answer=answer):
+				self.model.return_value = {"data": answer}
+				with self.assertRaises(ValueError):
+					decisions.decide_layout({}, self.layouts, "Purchase Invoice")
+
+	def test_every_page_needs_one_valid_answer(self):
+		valid = {"section": "Invoice", "confidence": 0.9}
+		for answers in ((valid,), (valid, valid, valid), (valid, {**valid, "section": "Other"}),
+			(valid, {**valid, "confidence": float("inf")}), (valid, {"section": "Receipt"})):
+			with self.subTest(answers=answers):
+				self.sections_reply(*answers)
+				with self.assertRaises(ValueError):
+					decisions.decide_sections({"pages": [{}, {}]}, "Bill", self.sections, "Purchase Invoice")
+
+	def test_oversized_state_never_calls_model(self):
+		state = {"text": "x" * int(decisions.MAX_INPUT_TOKENS * 3.5)}
+		with self.assertRaisesRegex(ValueError, "26,000-token budget after shrinking"):
+			decisions.decide_layout(state, self.layouts, "Purchase Invoice")
+		self.model.assert_not_called()
+
+	def test_large_state_within_budget_is_sent_whole(self):
+		state = {"text": "Printed invoice data " * 3000}
+		self.assertLess(decisions.estimated_tokens(state, ""), decisions.MAX_INPUT_TOKENS)
+		decisions.decide_layout(state, self.layouts, "Purchase Invoice")
+		self.assertEqual(scan_data(self.model.call_args), state)
+
+	def test_small_state_preserves_all_summary_page_data(self):
+		page = {key: value for key, value in page_data(1).items() if key not in extraction.RAW_FIELDS}
+		state = {"document": {"bill_no": "LOCAL-42"}, "pages": [page]}
+		self.assertEqual(decisions.bounded_state(state, ""), state)
+
+	def test_size_guard_order_and_preserved_fields(self):
+		for stage in ("items", "other_fields", "addresses"):
+			with self.subTest(stage=stage):
+				page = page_data(1)
+				page["items"] = [{"description": "Printed row " * 250}] * 40
+				if stage in ("other_fields", "addresses"):
+					page["other_fields"] = {"Terms": "t" * 100000}
+				if stage == "addresses":
+					page["parties"]["supplier"]["address"] = "a" * 100000
+				state = {"document": {"bill_no": "LOCAL-42"}, "pages": [page]}
+				original = deepcopy(state)
+				self.assertGreater(decisions.estimated_tokens(state, ""), decisions.MAX_INPUT_TOKENS)
+				bounded = decisions.bounded_state(state, "")
+				self.assertLessEqual(decisions.estimated_tokens(bounded, ""), decisions.MAX_INPUT_TOKENS)
+				self.assertEqual(state, original)
+				self.assertEqual(bounded["document"], state["document"])
+				result = bounded["pages"][0]
+				self.assertEqual(result["items"], page["items"][:15])
+				self.assertEqual(result["items_truncated"], 25)
+				if stage == "items":
+					self.assertEqual(result["other_fields"], page["other_fields"])
+				else:
+					self.assertNotIn("other_fields", result)
+				address = page["parties"]["supplier"]["address"]
+				self.assertEqual(result["parties"]["supplier"]["address"], address[:200] if stage == "addresses" else address)
+				for key in ("document_type", "document_number", "document_date", "references", "taxes", "totals"):
+					self.assertEqual(result[key], page[key])
+
+	def test_guard_counts_request_and_protects_essential_data(self):
+		self.assertRaises(ValueError, decisions.bounded_state, {"pages": [{"references": {"irn": "x" * 92000}}]}, "")
+		self.assertRaises(ValueError, decisions.bounded_state, {}, "x" * 92000)
+		layouts = {f"Layout {'x' * 1000} {index}": [{"title": "Invoice", "layout_type": "Single Page"}] for index in range(90)}
+		with self.assertRaises(ValueError):
+			decisions.decide_layout({}, layouts, "Purchase Invoice")
+		self.model.assert_not_called()
+
+	def test_guard_keeps_every_page_and_only_counts_omitted_rows(self):
+		pages = [page_data(1, items=None), page_data(2), page_data(3, items=[{"qty": "2"}] * 40)]
+		pages[0]["other_fields"] = {"Terms": "x" * 92000}
+		result = decisions.bounded_state({"pages": pages}, "")["pages"]
+		self.assertEqual([page["page_no"] for page in result], [1, 2, 3])
+		self.assertIsNone(result[0]["items"])
+		self.assertEqual(result[1]["items"], pages[1]["items"])
+		self.assertNotIn("items_truncated", result[0])
+		self.assertNotIn("items_truncated", result[1])
+		self.assertEqual(result[2]["items_truncated"], 25)
+		self.assertEqual(len(result[2]["items"]), 15)
+
+	def test_model_receives_bounded_state_without_trimming_saved_input(self):
+		state = {"pages": [{"items": [{"description": "x" * 3000}] * 40, "other_fields": None}]}
+		decisions.decide_layout(state, self.layouts, "Purchase Invoice")
+		self.assertEqual(len(scan_data(self.model.call_args)["pages"][0]["items"]), 15)
+		self.assertEqual(len(state["pages"][0]["items"]), 40)
+
+	def test_raw_page_fields_are_always_dropped(self):
+		pages = [page_data(1)]
+		result = decisions.bounded_state({"pages": pages}, "")["pages"][0]
+		for field in extraction.RAW_FIELDS:
+			self.assertNotIn(field, result)
+			self.assertIn(field, pages[0])
+		self.assertEqual(result["items"], pages[0]["items"])

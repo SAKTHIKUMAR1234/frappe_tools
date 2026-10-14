@@ -21,7 +21,7 @@ frappe.ui.form.on("Scanned Document AI Verifier", {
 		listen_for_progress(frm);
 		show_progress(frm, frm.doc);
 		const active = ["Queued", "Running"].includes(frm.doc.status);
-		for (const field of ["reference_doctype", "prompt", "max_documents"]) {
+		for (const field of ["reference_doctype", "prompt", "max_documents", "ai_account", "model"]) {
 			frm.set_df_property(field, "read_only", active);
 		}
 		if (active) frm.disable_save();
