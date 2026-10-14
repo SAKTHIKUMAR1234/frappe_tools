@@ -7,6 +7,7 @@ from six import string_types
 
 import base64
 import io
+import re
 import uuid
 import json
 from frappe.utils.file_manager import save_file
@@ -365,7 +366,7 @@ def get_source_detail(detail: str | None, file_url: str | None) -> frappe._dict:
 	return source
 
 
-def create_image_upload(attach, doctype, docname, fieldname="attachment"):
+def create_image_upload(attach, doctype, docname, fieldname="attachment", named=False):
 	if attach.startswith("data:"):
 		header, attach = attach.split(",", 1)
 		mime = header.split(";")[0].split(":")[1]
@@ -388,7 +389,7 @@ def create_image_upload(attach, doctype, docname, fieldname="attachment"):
 	except Exception:
 		frappe.throw("Invalid or unsupported image format")
 
-	file_name = f"{uuid.uuid4()}.{ext}"
+	file_name = f"{attachment_file_stem(doctype, docname, fieldname) if named else uuid.uuid4()}.{ext}"
 
 	file_doc = save_file_always_new(
 		fname=file_name,
@@ -411,6 +412,12 @@ def create_image_upload(attach, doctype, docname, fieldname="attachment"):
 	# Return the doc, not just the url: core dedup points several File rows at one
 	# file_url, so the url can't identify which File we just made.
 	return file_doc
+
+
+def attachment_file_stem(doctype: str, docname: str, fieldname: str) -> str:
+	"""Return `{doctype}_{docname}_{fieldname}_{unique}` with only file-safe characters."""
+	parts = [doctype, docname, fieldname, frappe.generate_hash(length=8)]
+	return "_".join(re.sub(r"[^\w-]+", "-", part).strip("-") for part in parts)
 
 
 @frappe.whitelist()
@@ -504,7 +511,7 @@ def attach_image_to_field(doctype, docname, fieldname, image_data):
 		if old_file:
 			frappe.delete_doc("File", old_file, ignore_permissions=True)
 
-	file_doc = create_image_upload(image_data, doctype, docname, fieldname=fieldname)
+	file_doc = create_image_upload(image_data, doctype, docname, fieldname=fieldname, named=True)
 
 	# Reload doc since old file delete may have cleared the field
 	doc.reload()
