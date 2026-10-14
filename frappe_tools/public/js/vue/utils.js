@@ -29,3 +29,16 @@ export function frappeCallAsync(method, args) {
     });
   });
 }
+
+// Ignores a call while the previous one runs; `busy.value` is true until its last request ends.
+export function oneAtATime(run, busy) {
+  return async (...args) => {
+    if (busy.value) return;
+    busy.value = true;
+    try {
+      return await run(...args);
+    } finally {
+      busy.value = false;
+    }
+  };
+}

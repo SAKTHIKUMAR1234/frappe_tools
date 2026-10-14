@@ -7,7 +7,14 @@ from frappe.utils import cint
 from frappe.utils.background_jobs import is_job_enqueued
 from pypika.terms import ExistsCriterion
 
-from frappe_tools.file_data.documents import DETAIL, SCAN, files_by_url, scan_files
+from frappe_tools.file_data.documents import (
+	DETAIL,
+	PAGE_ORDER,
+	SCAN,
+	active_page_filters,
+	files_by_url,
+	scan_files,
+)
 from frappe_tools.file_data.reader import FILE, MAX_AUTO_ATTEMPTS, read_file, retry_cutoff
 
 SETTINGS = "Document Scanner Settings"
@@ -57,7 +64,7 @@ def has_unread_pages(scanned_document: str) -> bool:
 	detail = DocType(DETAIL)
 	return bool(frappe.qb.from_(detail).select(detail.name).where(
 		(detail.scanner_document == scanned_document) & (detail.is_deleted == 0)
-		& _file_with(detail, _has_data).negate()
+		& (IfNull(detail.attachment, "") != "") & _file_with(detail, _has_data).negate()
 	).limit(1).run())
 
 
@@ -123,8 +130,8 @@ def lock_page_snapshot(scan: dict, details: list[dict]) -> tuple[dict | None, st
 	if any(current.get(key) != scan.get(key) for key in SCAN_FIELDS):
 		return current, "Scan settings or status changed during AI processing."
 	rows = frappe.db.get_values(
-		DETAIL, {"scanner_document": scan.name, "is_deleted": 0},
-		list(DETAIL_FIELDS), as_dict=True, order_by="page_no asc, name asc", for_update=True,
+		DETAIL, active_page_filters(scan.name),
+		list(DETAIL_FIELDS), as_dict=True, order_by=PAGE_ORDER, for_update=True,
 	)
 	if [tuple(row.get(key) for key in DETAIL_FIELDS) for row in rows] != [
 		tuple(row.get(key) for key in DETAIL_FIELDS) for row in details

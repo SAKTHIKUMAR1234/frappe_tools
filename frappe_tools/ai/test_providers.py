@@ -17,6 +17,7 @@ IMAGE = "data:image/png;base64,bG9jYWw="
 def response(result: dict | None = None, status: int = 200, events: list | None = None) -> Mock:
 	mock = Mock(status_code=status)
 	mock.json.return_value = result or {}
+	mock.iter_content.return_value = [json.dumps(result or {}).encode()]
 	mock.iter_lines.return_value = [b"data: " + json.dumps(event).encode() for event in events or []]
 	return mock
 

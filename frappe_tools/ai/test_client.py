@@ -1,4 +1,5 @@
 import json
+import time
 from unittest.mock import patch
 
 import frappe
@@ -87,6 +88,114 @@ class TestClient(UnitTestCase):
 			[c.kwargs["json"]["model"] for c in self.post.call_args_list], ["first", "first", "second"]
 		)
 		self.assertEqual([log.status for log in self.logs()], ["Error", "Error", "Success"])
+
+	def test_deadline_bounds_requests_and_stops_fallback(self):
+		self.row("first")
+		self.row("second")
+		clock = time.monotonic
+		deadline = clock() + 30
+		self.post.side_effect = [response(status=503), self.success()]
+		# The budget is used up during the wait before the retry.
+		with (
+			patch.object(client.time, "monotonic", side_effect=lambda: deadline + 1 if self.sleep.called else clock()),
+			self.assertRaises(client.DeadlineReached),
+		):
+			self.call(deadline=deadline)
+		self.assertEqual(self.post.call_count, 1)
+		self.assertLessEqual(self.post.call_args.kwargs["timeout"], 30)
+
+	def test_each_request_step_gets_only_the_time_left(self):
+		self.row("first")
+		self.settings.request_timeout = 120
+		now = [1000.0]
+
+		def slow_credentials(account, timeout):
+			now[0] += 7
+			return {"api_key": "local-only-secret-key"}
+
+		with (
+			patch.object(client.time, "monotonic", side_effect=lambda: now[0]),
+			patch.object(client.accounts, "credentials", side_effect=slow_credentials) as credentials,
+		):
+			self.call(deadline=now[0] + 10)
+		self.assertEqual(credentials.call_args.args[1], 10)
+		self.assertEqual(self.post.call_args.kwargs["timeout"], 3)
+
+	def test_stream_stops_reading_at_the_deadline(self):
+		self.row("chosen")
+		self.account.update(dict(provider="OpenAI Codex", auth_type="ChatGPT Login"))
+		self.account.save()
+		credentials = dict(access_token="local-only-access", refresh_token="local-only-refresh", chatgpt_account_id="local-account")
+		now = [1000.0]
+		deadline = now[0] + 30
+
+		def slow_stream():
+			delta = {"type": "response.output_text.delta", "delta": "{}"}
+			while True:
+				now[0] += 20
+				yield b"data: " + json.dumps(delta).encode()
+
+		stream = response()
+		stream.iter_lines.return_value = slow_stream()
+		self.post.return_value = stream
+		with (
+			patch.object(client.time, "monotonic", side_effect=lambda: now[0]),
+			patch.object(client.accounts, "credentials", return_value=credentials),
+			self.assertRaises(client.DeadlineReached),
+		):
+			self.call(deadline=deadline)
+		self.assertEqual(self.post.call_count, 1)
+		self.assertEqual([log.status for log in self.logs()], ["Timeout"])
+		stream.close.assert_called_once()
+
+	def test_slowly_sent_answer_stops_at_the_deadline(self):
+		self.row("chosen")
+		now = [1000.0]
+
+		def slow_body():
+			while True:
+				now[0] += 20
+				yield b" "
+
+		slow = self.success()
+		slow.iter_content.return_value = slow_body()
+		self.post.return_value = slow
+		with patch.object(client.time, "monotonic", side_effect=lambda: now[0]), self.assertRaises(client.DeadlineReached):
+			self.call(deadline=now[0] + 30)
+		self.assertTrue(self.post.call_args.kwargs["stream"])
+		self.assertEqual(self.post.call_count, 1)
+		self.assertEqual([log.status for log in self.logs()], ["Timeout"])
+
+	def test_answer_completed_after_the_deadline_is_rejected(self):
+		self.row("chosen")
+		self.settings.max_attempts = 1
+		now = [1000.0]
+		late = self.success()
+		body = late.iter_content.return_value[0]
+
+		def last_part_arrives_late():
+			yield body
+			now[0] += 40
+
+		late.iter_content.return_value = last_part_arrives_late()
+		self.post.return_value = late
+		with patch.object(client.time, "monotonic", side_effect=lambda: now[0]), self.assertRaises(client.DeadlineReached):
+			self.call(deadline=now[0] + 30)
+		self.assertEqual([log.status for log in self.logs()], ["Timeout"])
+
+	def test_budget_ending_on_the_last_attempt_is_a_deadline_not_a_failure(self):
+		self.row("only")
+		self.settings.max_attempts = 1
+		now = [1000.0]
+
+		def timed_out(*args, **kwargs):
+			now[0] += 30
+			raise requests.Timeout("Local read timeout")
+
+		self.post.side_effect = timed_out
+		with patch.object(client.time, "monotonic", side_effect=lambda: now[0]), self.assertRaises(client.DeadlineReached):
+			self.call(deadline=now[0] + 10)
+		self.assertEqual([log.status for log in self.logs()], ["Timeout"])
 
 	def test_unauthorized_skips_retries(self):
 		self.row("first")

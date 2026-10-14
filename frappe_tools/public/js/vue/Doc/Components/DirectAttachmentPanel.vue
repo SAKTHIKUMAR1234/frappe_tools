@@ -200,7 +200,7 @@ watch(
         if (uploadingField.value) return
         if (newLen <= lastProcessedLength.value) return
 
-        const imageData = dragStore.imagesList[dragStore.imagesList.length - 1]
+        const imageData = dragStore.imagesList[dragStore.imagesList.length - 1].attachment
         dragStore.imagesList.splice(dragStore.imagesList.length - 1, 1)
 
         const fieldname = selectedField.value

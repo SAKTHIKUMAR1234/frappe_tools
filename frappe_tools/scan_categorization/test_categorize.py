@@ -7,6 +7,8 @@ import cv2
 import frappe
 from frappe.tests import UnitTestCase
 
+from frappe_tools.ai.test_providers import response as provider_response
+from frappe_tools.api.doc_classify import load_classification_pages
 from frappe_tools.extractors.pipeline import file_to_data_url
 from frappe_tools.file_data import extraction
 from frappe_tools.file_data import reader as file_reader
@@ -515,9 +517,8 @@ class TestCategorize(UnitTestCase):
 		self.clear_pages(self.details[:1])
 		self.vision.stop()
 		settings = frappe._dict(model="local/test-vision", max_attempts=1, get_api_key=lambda: "local-test-key")
-		response = Mock(status_code=200)
-		response.json.return_value = {"choices": [{"message": {"content": json.dumps({"pages": self.pages[:1]})},
-			"finish_reason": "length"}]}
+		response = provider_response({"choices": [{"message": {"content": json.dumps({"pages": self.pages[:1]})},
+			"finish_reason": "length"}]})
 		self.post.side_effect = None
 		self.post.return_value = response
 		with patch.object(llm, "ensure_ready", return_value=settings), self.assertRaises(ValueError):
@@ -573,11 +574,10 @@ class TestCategorize(UnitTestCase):
 		self.clear_pages(self.details[:1])
 		settings = frappe._dict(model="local/test-vision", max_attempts=1, max_tokens=8000,
 			request_timeout=30, get_api_key=lambda: "local-test-key")
-		response = Mock(status_code=200)
-		response.json.return_value = {
+		response = provider_response({
 			"choices": [{"message": {"content": json.dumps({"pages": self.pages[:1]})}, "finish_reason": "stop"}],
 			"usage": {"prompt_tokens": 100, "completion_tokens": 300, "total_tokens": 400},
-		}
+		})
 		self.post.side_effect = None
 		self.post.return_value = response
 		with patch.object(llm, "ensure_ready", return_value=settings):
@@ -924,9 +924,7 @@ class TestCategorize(UnitTestCase):
 		responses = []
 		for data in ({"columns": [{"key": "quantity", "label": "Quantity"}]},
 			{"values": {"quantity": 5}, "remarks": "Matches"}):
-			response = Mock(status_code=200)
-			response.json.return_value = {"choices": [{"message": {"content": json.dumps(data)}}]}
-			responses.append(response)
+			responses.append(provider_response({"choices": [{"message": {"content": json.dumps(data)}}]}))
 		self.post.side_effect = responses
 		with patch.object(llm, "ensure_ready", return_value=settings), patch.object(frappe, "enqueue"):
 			verifier.run_verifier(doc.name)
@@ -962,8 +960,7 @@ class TestCategorize(UnitTestCase):
 
 		self.vision.stop()
 		settings = frappe._dict(model="local/test-compatibility", max_attempts=2, get_api_key=lambda: "local-test-key")
-		response = Mock(status_code=200)
-		response.json.return_value = {"choices": [{"message": {"content": '{"quantity": 5}'}}]}
+		response = provider_response({"choices": [{"message": {"content": '{"quantity": 5}'}}]})
 		context = {"phase": "Page Extraction", "reference_doctype": flow.SCAN,
 			"reference_name": self.scan.name, "run_id": frappe.generate_hash(length=12)}
 		self.post.side_effect = [response, requests.Timeout("Local timeout"), response]
@@ -995,7 +992,8 @@ class TestCategorize(UnitTestCase):
 		content = original.get_content()
 		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
 		self.assertEqual(self.scan.reload().ai_check_status, "Done")
-		replacements = [upload_image(detail.reload().as_dict()) for detail in self.details]
+		replacements = [upload_image({**detail.reload().as_dict(), "detail": detail.name, "attachment": None})
+			for detail in self.details]
 		make_or_update_main_doc(self.scan._doctype, self.scan.scanner_layout, self.scan._docname,
 			scan_name=self.scan.name, documents=replacements)
 		# Exercise cleanup's retention guard even for legacy ownership left on an old row.
@@ -1013,6 +1011,101 @@ class TestCategorize(UnitTestCase):
 		self.assertEqual(original.attached_to_name, replacements[0])
 		self.assertEqual(original.attached_to_field, "original_attachment")
 		self.assertEqual(frappe.db.get_value(flow.DETAIL, replacements[0], "original_attachment"), original.file_url)
+
+	def scanner_page(self, detail=None, attachment=None):
+		return {"page_no": 1, "page_type": "Front", "layout_type": "Single Page", "title": self.titles[0],
+			"detail": detail, "attachment": attachment}
+
+	def empty_slot(self, title, layout_type, page_no):
+		return frappe.get_doc({
+			"doctype": flow.DETAIL, "scanner_document": self.scan.name, "page_no": page_no,
+			"layout_type": layout_type, "page_type": "Front", "title": title,
+		}).insert()
+
+	def test_reopened_scan_gives_each_page_its_detail(self):
+		from frappe_tools.api.doc_scanner import load_scanned_document_details
+
+		attachments = load_scanned_document_details(self.scan.name)["attachments"]
+		self.assertEqual({row["detail"]: row["file_url"] for row in attachments},
+			{detail.name: detail.attachment for detail in self.details})
+
+	def test_resave_keeps_the_current_files_of_a_moved_page(self):
+		from frappe_tools.api.doc_scanner import upload_image
+
+		# A file migration changes the stored URLs after the scanner loaded the page.
+		frappe.db.set_value(flow.DETAIL, self.details[0].name,
+			{"attachment": "/private/files/local-moved.png", "original_attachment": "/private/files/local-original.png"})
+		saved = upload_image(self.scanner_page(detail=self.details[0].name))
+		self.assertEqual(frappe.db.get_value(flow.DETAIL, saved, ["attachment", "original_attachment"]),
+			("/private/files/local-moved.png", "/private/files/local-original.png"))
+
+	def test_resave_of_a_stale_page_is_refused(self):
+		from frappe_tools.api.doc_scanner import upload_image
+
+		stale_url = self.details[0].attachment
+		frappe.db.set_value(flow.DETAIL, self.details[0].name, "attachment", "/private/files/local-moved.png")
+		with self.assertRaisesRegex(frappe.ValidationError, "Reload the scan"):
+			upload_image(self.scanner_page(attachment=stale_url))
+		frappe.db.set_value(flow.DETAIL, self.details[1].name, "is_deleted", 1)
+		with self.assertRaisesRegex(frappe.ValidationError, "Reload the scan"):
+			upload_image(self.scanner_page(detail=self.details[1].name))
+
+	def test_resave_needs_print_permission_on_the_page_document(self):
+		from frappe_tools.api.doc_scanner import upload_image
+
+		with (
+			patch.object(frappe, "has_permission", return_value=False) as permission,
+			self.assertRaises(frappe.PermissionError),
+		):
+			upload_image(self.scanner_page(detail=self.details[0].name))
+		permission.assert_called_once_with("Purchase Invoice", doc=self.bill.name, ptype="print")
+
+	def test_empty_scanner_slot_is_not_a_page(self):
+		self.empty_slot(self.titles[0], "Single Page", 3)
+		self.assertFalse(reader.has_unread_pages(self.scan.name))
+		self.assertEqual(len(self.scan_pages(self.scan.name)), 2)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
+		self.assertEqual(self.scan.reload().ai_check_status, "Done")
+
+	def test_categorization_retires_empty_slots_at_the_pages_it_places(self):
+		from frappe_tools.api.doc_scanner import load_scanned_document_details
+
+		taken = self.empty_slot(self.titles[1], "Series Vertical", 1)
+		free = self.empty_slot(self.titles[1], "Series Vertical", 2)
+		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
+		self.assertEqual(self.scan.reload().ai_check_status, "Done", self.scan.ai_error)
+		self.assertEqual((taken.reload().is_deleted, free.reload().is_deleted), (1, 0))
+		positions = [(row["title"], row["page_no"], row["page_type"])
+			for row in load_scanned_document_details(self.scan.name)["attachments"]]
+		self.assertEqual(len(positions), len(set(positions)))
+
+	def test_legacy_classifier_retires_empty_slots_at_the_pages_it_places(self):
+		from frappe_tools.api.doc_classify import classify_scanned_document, page_classifier
+
+		taken = self.empty_slot(self.titles[1], "Series Vertical", 1)
+		free = self.empty_slot(self.titles[1], "Series Vertical", 3)
+		pages = [{"section": self.titles[1], "page_type": "Front"}] * 2
+		with patch.object(page_classifier, "classify", return_value={"pages": pages}):
+			classify_scanned_document(self.scan.name)
+		self.assertEqual((taken.reload().is_deleted, free.reload().is_deleted), (1, 0))
+		self.assertEqual(self.details[0].reload().title, self.titles[1])
+		self.assertEqual(self.details[0].layout_type, "Series Vertical")
+
+	def test_load_lists_an_attached_page_before_an_empty_slot_at_its_position(self):
+		from frappe_tools.api.doc_scanner import load_scanned_document_details
+
+		self.empty_slot(self.titles[0], "Single Page", 1)
+		rows = load_scanned_document_details(self.scan.name)["attachments"]
+		self.assertEqual(rows[0]["detail"], self.details[0].name)
+		self.assertIsNone(rows[1]["attachment"])
+
+	def test_front_is_read_before_back_of_the_same_page(self):
+		for detail, side in zip(self.details, ("Back", "Front"), strict=True):
+			frappe.db.set_value(flow.DETAIL, detail.name, {"page_no": 1, "page_type": side})
+		self.assertEqual(files_for_document(flow.SCAN, self.scan.name),
+			[self.file(detail).name for detail in reversed(self.details)])
+		self.assertEqual([detail.name for detail in load_classification_pages(self.scan.name)[0]],
+			[detail.name for detail in reversed(self.details)])
 
 	def test_stale_token_never_writes_outcome(self):
 		old_run = self.scan.ai_run_id

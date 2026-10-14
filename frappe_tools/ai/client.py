@@ -13,6 +13,11 @@ from frappe_tools.utils import llm
 
 TASKS = ("Document Extraction", "Page Classification", "Page Extraction", "Scan Decision", "Verifier")
 PROVIDERS = {"OpenRouter": openrouter, "OpenAI Codex": codex, "Anthropic": anthropic}
+BODY_CHUNK_BYTES = 8192
+
+
+class DeadlineReached(TimeoutError):
+	"""The time budget of an AI run ended before the next request."""
 
 
 def call_model(
@@ -30,8 +35,12 @@ def call_model(
 	run_id=None,
 	min_output_tokens: int = 0,
 	route: tuple[str, str] | None = None,
+	deadline: float | None = None,
 ) -> dict:
-	"""Try the chosen (account, model) `route`, then task models in priority order, and log each attempt."""
+	"""Try the chosen (account, model) `route`, then task models in priority order, and log each attempt.
+
+	No request starts after `deadline` (time.monotonic()) and none runs past it.
+	"""
 	settings = task_settings(task)
 	options = task_options(settings, min_output_tokens)
 	prompts = (system_prompt, user_prompt, images or [], schema)
@@ -49,7 +58,7 @@ def call_model(
 
 	last_error = frappe._("No enabled AI model and account for this task")
 	for account, model in routes(settings, task, route):
-		outcome = try_model(account, model, build, options, context)
+		outcome = try_model(account, model, build, options, context, deadline)
 		if outcome.get("ok"):
 			return outcome["result"]
 		last_error = outcome["error"]
@@ -103,18 +112,32 @@ def _legacy_route(settings):
 	return {"provider": "OpenRouter", "api_key": key, "auth_type": "API Key"}, settings.model
 
 
-def try_model(account, model: str, build, options: dict, context: dict) -> dict:
+def bounded_options(options: dict, deadline: float | None) -> dict:
+	"""Return `options` with a request timeout that ends by `deadline`; raise DeadlineReached after it."""
+	if deadline is None:
+		return options
+	remaining = deadline - time.monotonic()
+	if remaining <= 0:
+		raise DeadlineReached(frappe._("The AI time budget is used up"))
+	return {**options, "timeout": min(options["timeout"], remaining)}
+
+
+def try_model(account, model: str, build, options: dict, context: dict, deadline: float | None = None) -> dict:
 	"""Run one model request with retries; `build(adapter, credentials, model)` returns (url, headers, body)."""
 	for attempt in range(1, options["attempts"] + 1):
-		outcome = _attempt(account, model, build, options, context)
-		if outcome["ok"] or not outcome["retryable"]:
+		outcome = _attempt(account, model, build, bounded_options(options, deadline), context, deadline)
+		if outcome["ok"]:
+			return outcome
+		if deadline is not None and time.monotonic() >= deadline:
+			raise DeadlineReached(frappe._("The AI time budget ended during the request"))
+		if not outcome["retryable"]:
 			return outcome
 		if attempt < options["attempts"]:
 			time.sleep(min(2 * attempt, 8))
 	return outcome
 
 
-def _attempt(account, model, build, options, context):
+def _attempt(account, model, build, options, context, deadline=None):
 	started = time.monotonic()
 	state = dict(
 		body={},
@@ -131,10 +154,13 @@ def _attempt(account, model, build, options, context):
 	provider = account.get("provider")
 	qualified_model = f"{provider}/{model}"
 	try:
-		_execute(account, model, build, options, state)
+		_execute(account, model, build, options, state, deadline)
 		state.update(status="Success", error=None)
 	except JobTimeoutException:
 		state.update(status="Timeout", error=frappe._("AI job timed out"))
+		raise
+	except DeadlineReached as exc:
+		state.update(status="Timeout", error=str(exc))
 		raise
 	except Exception as exc:
 		_failure(state, exc)
@@ -157,16 +183,20 @@ def _attempt(account, model, build, options, context):
 	return {"ok": False, "error": state["error"], "retryable": state["retryable"]}
 
 
-def _execute(account, model, build, options, state):
-	credentials = accounts.credentials(account, options["timeout"])
+def _execute(account, model, build, options, state, deadline):
+	"""Each step gets only the time left before `deadline`; the answer is read in parts and stops at it."""
+	credentials = accounts.credentials(account, bounded_options(options, deadline)["timeout"])
 	state["secrets"] = [credentials.get(field) for field in ("api_key", "access_token", "refresh_token")]
 	adapter = PROVIDERS[account.get("provider")]
 	url, headers, state["body"] = build(adapter, credentials, model)
+	stream = adapter is codex
 	response = requests.post(
-		url, headers=headers, json=state["body"], timeout=options["timeout"], stream=adapter is codex
+		url, headers=headers, json=state["body"], timeout=bounded_options(options, deadline)["timeout"], stream=True
 	)
 	try:
 		state["http_status"] = response.status_code
+		if not stream:
+			response._content = read_body(response, deadline)
 		if response.status_code >= 400:
 			try:
 				state["result"] = response.json()
@@ -176,15 +206,26 @@ def _execute(account, model, build, options, state):
 				error_message(state["result"]) or frappe._("Provider returned HTTP {0}").format(response.status_code),
 				response.status_code,
 			)
-		state["raw_text"], state["usage"], state["finish_reason"], state["result"] = adapter.parse_response(
-			response
-		)
+		parsed = codex.parse_response(response, deadline) if stream else adapter.parse_response(response)
+		state["raw_text"], state["usage"], state["finish_reason"], state["result"] = parsed
+		if deadline is not None and time.monotonic() >= deadline:
+			raise requests.Timeout(frappe._("The AI answer arrived after the time budget ended"))
 		state["calls"] = adapter.tool_calls(state["result"]) if state["body"].get("tools") else []
 		state["data"] = llm.safe_json_loads(state["raw_text"])
 		if state["data"] is None and not state["calls"]:
 			raise ValueError(_json_error(state))
 	finally:
 		response.close()
+
+
+def read_body(response: requests.Response, deadline: float | None) -> bytes:
+	"""Read the whole body; raise Timeout when `deadline` passes, so a slowly sent answer cannot run past it."""
+	chunks = []
+	for chunk in response.iter_content(BODY_CHUNK_BYTES):
+		if deadline is not None and time.monotonic() >= deadline:
+			raise requests.Timeout(frappe._("The AI time budget ended while the answer was read"))
+		chunks.append(chunk)
+	return b"".join(chunks)
 
 
 def _failure(state, exc):

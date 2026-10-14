@@ -10,7 +10,7 @@
         <div v-for="(img, index) in images" :key="index" class="image-wrapper">
           <div class="doc-page-content clarity-container">
             <img 
-              :src="img" 
+              :src="img.attachment" 
               class="image-item" 
               :draggable="true" 
               @dragstart="onDragStart(index)" 

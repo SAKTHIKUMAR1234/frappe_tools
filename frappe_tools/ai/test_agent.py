@@ -164,9 +164,17 @@ class TestAgent(UnitTestCase):
 			self.call(deadline=time.monotonic() - 1)
 		self.post.assert_not_called()
 
-	def test_turn_timeout_never_exceeds_remaining_budget(self):
-		run = agent.AgentRun([], [], time.monotonic() + 5)
-		self.assertLessEqual(run.get_turn_options({"timeout": 120})["timeout"], 5)
+	def test_turn_retries_are_bounded_and_stop_at_the_deadline(self):
+		self.settings.max_attempts = 3
+		now = [1000.0]
+		self.post.return_value = response(status=503)
+		with (
+			patch.object(client.time, "monotonic", side_effect=lambda: now[0]),
+			patch.object(client.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + 4)),
+			self.assertRaises(client.DeadlineReached),
+		):
+			self.call(deadline=now[0] + 5)
+		self.assertEqual([entry.kwargs["timeout"] for entry in self.post.call_args_list], [5, 1])
 
 	def test_model_override_first_then_task_rows(self):
 		chosen = self.new_account("OpenRouter", "API Key", "-chosen")

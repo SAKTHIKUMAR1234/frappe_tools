@@ -1,7 +1,7 @@
 <template>
     <div class="main-content" ref="root">
         <div class="action_section">
-            <button class="btn btn-primary btn-sm" @click.prevent="validateUpdadeScannedDetails">
+            <button class="btn btn-primary btn-sm" :disabled="isSaving" @click.prevent="save">
                 {{ props.is_new ? 'Create' : 'Update' }}
             </button>
             <button v-if="!props.is_new" class="btn btn-default btn-sm" @click.prevent="emit('newScan')">
@@ -30,8 +30,9 @@ import FrontBackVertical from './FrontBackVertical.vue';
 import SinglePage from './SinglePage.vue';
 import SeriesVertical from './SeriesVertical.vue';
 import { reactive, ref, onMounted, watch } from 'vue';
-import { frappeCallAsync, imageToDataURL } from '../../../utils';
+import { frappeCallAsync, imageToDataURL, oneAtATime } from '../../../utils';
 import { useGloabalDragMemory } from '../../../Store/doc_scanner_drag_drop_memory';
+import { storedPages, refreshSavedDetails } from '../../../Store/scan_pages';
 
 const props = defineProps({
     is_new: {
@@ -59,6 +60,7 @@ const root = ref(null);
 const currScannerDetails = ref(null);
 const layout_select = ref(null);
 const localScanName = ref(props.scan_name);
+const isSaving = ref(false);
 
 watch(() => props.is_new, (val) => {
     if (val) {
@@ -106,7 +108,7 @@ function removeOnPage(value, page_no) {
         const [image_details] = images.splice(i, 1);
 
         if (image_details && image_details.attachment) {
-            sendAttachementDetails(image_details.attachment);
+            sendAttachementDetails(image_details);
         }
     }
 
@@ -114,28 +116,23 @@ function removeOnPage(value, page_no) {
 }
 
 function sendAttachementDetails(image) {
-    dragMem.setImagesDetails([...dragMem.imagesList, image]);
+    dragMem.setImagesDetails([...dragMem.imagesList, { attachment: image.attachment, detail: image.detail || null }]);
 }
 
 
 
 function removeOnImage(value, page_no, page_type) {
     const images = dragMem.document_scanner_details.sections[value].images;
-    let removable = null;
-    for (let i = 0; i < images.length; i++) {
-        if (page_no == images[i]['page_no'] && images[i]['page_type'] == page_type) {
-            removable = images[i]['attachment'];
-            images[i]['attachment'] = null
-            break;
-        }
-    }
-    if (removable) {
-        sendAttachementDetails(removable);
+    const image = images.find((img) => img.page_no == page_no && img.page_type == page_type);
+    if (image?.attachment) {
+        sendAttachementDetails(image);
+        Object.assign(image, { attachment: null, detail: null });
     }
 }
 
+// Returns one { image, attachment, sent_detail, detail } per saved image; a stored page is sent as its detail.
 async function uploadImagesWithConcurrency(sections, layout, concurrency = 2) {
-    let attachmentNames = [];
+    const saved = [];
     const tasks = [];
 
     for (const section of Object.keys(sections)) {
@@ -148,13 +145,15 @@ async function uploadImagesWithConcurrency(sections, layout, concurrency = 2) {
             const req_body = {
                 ...body_data,
                 page_no: image.page_no,
-                attachment: image.attachment,
+                detail: image.attachment ? image.detail || null : null,
+                attachment: image.detail ? null : image.attachment,
                 page_type: image.page_type
             };
+            const attachment = image.attachment;
             tasks.push(() =>
                 frappeCallAsync("frappe_tools.api.doc_scanner.upload_image", {
                     image_data: JSON.stringify(req_body)
-                }).then(r => attachmentNames.push(r.message))
+                }).then(r => saved.push({ image, attachment, sent_detail: req_body.detail, detail: r.message }))
             );
         }
     }
@@ -172,7 +171,12 @@ async function uploadImagesWithConcurrency(sections, layout, concurrency = 2) {
     }
 
     await runTasksLimited(tasks, concurrency);
-    return attachmentNames;
+    return saved;
+}
+
+function setSavedDetails(saved) {
+    const sections = Object.values(dragMem.document_scanner_details.sections || {});
+    refreshSavedDetails(saved, [...sections.flatMap((section) => section.images), ...dragMem.imagesList]);
 }
 
 
@@ -199,33 +203,30 @@ async function validateUpdadeScannedDetails() {
         return;
     }
 
-    let attachmentNames = await uploadImagesWithConcurrency(dataToSend, layout, 5);
-    frappe.call({
-        "method": "frappe_tools.api.doc_scanner.make_or_update_main_doc",
-        "args": {
-            "layout": layout,
-            "doctype": props.doctype,
-            "docname": props.document_name,
-            "is_new": props.is_new,
-            "documents": JSON.stringify(attachmentNames),
-            "scan_name": localScanName.value
-        },
-        "callback": (r) => {
-            localScanName.value = r.message;
-            if (props.is_new) {
-                frappe.show_alert({ message: __('Document Created Successfully'), indicator: 'green' });
-                // Update URL without reload to preserve WebRTC
-                const newPath = `document-scanner/${encodeURIComponent(props.doctype)}/${encodeURIComponent(props.document_name)}/${encodeURIComponent(r.message)}`;
-                window.history.replaceState(null, '', `/app/${newPath}`);
-                emit('created');
-            } else {
-                frappe.show_alert({ message: __('Document Updated Successfully'), indicator: 'green' });
-            }
-        },
-        freeze: true,
-        freeze_msg: "Please Wait While Processing"
-    })
+    const saved = await uploadImagesWithConcurrency(dataToSend, layout, 5);
+    const r = await frappeCallAsync("frappe_tools.api.doc_scanner.make_or_update_main_doc", {
+        "layout": layout,
+        "doctype": props.doctype,
+        "docname": props.document_name,
+        "is_new": props.is_new,
+        "documents": JSON.stringify(saved.map((row) => row.detail)),
+        "scan_name": localScanName.value
+    });
+    localScanName.value = r.message;
+    setSavedDetails(saved);
+    if (props.is_new) {
+        frappe.show_alert({ message: __('Document Created Successfully'), indicator: 'green' });
+        // Update URL without reload to preserve WebRTC
+        const newPath = `document-scanner/${encodeURIComponent(props.doctype)}/${encodeURIComponent(props.document_name)}/${encodeURIComponent(r.message)}`;
+        window.history.replaceState(null, '', `/app/${newPath}`);
+        emit('created');
+    } else {
+        frappe.show_alert({ message: __('Document Updated Successfully'), indicator: 'green' });
+    }
 }
+
+// Two saves at once would each retire the other's details, so a save waits for the last one to end.
+const save = oneAtATime(validateUpdadeScannedDetails, isSaving);
 
 function createLinkComponent() {
     const el = root.value;
@@ -296,19 +297,31 @@ async function setupDocumentScannerDetail(details) {
 
     const attachments = await Promise.all(details['attachments'].map(async (ele) => ({
         ...ele,
-        "attachment": ele['attachment'] ? await imageToDataURL(ele['attachment']) : ele['attachment'],
+        "attachment": ele['attachment'] ? await imageToDataURL(ele['attachment']) : null,
     })));
 
     for (const [key, section] of Object.entries(dragMem.document_scanner_details.sections)) {
-        const stored = attachments
-            .filter((ele) => ele['title'] === key && ele['layout_type'] === section.section_type)
-            .map((ele) => ({ "attachment": ele['attachment'], "page_no": ele['page_no'], "page_type": ele['page_type'] }));
+        const stored = storedPages(attachments, key, section.section_type);
         if (!stored.length) continue;
 
         const offset = Math.max(...stored.map((img) => img.page_no));
         section.images.forEach((img) => { img.page_no += offset; });
         section.images.unshift(...stored);
         dragMem.renumberPages(section.images);
+        if (section.section_type === "Single Page") {
+            moveToTray(section.images.splice(stored.length));
+        }
+    }
+}
+
+// A Single Page section shows one image: a scan placed there while loading goes back to the tray.
+function moveToTray(images) {
+    const attached = images
+        .filter((img) => img.attachment)
+        .map((img) => ({ attachment: img.attachment, detail: img.detail || null }));
+    if (attached.length) {
+        dragMem.setImagesDetails([...dragMem.imagesList, ...attached]);
+        frappe.show_alert({ message: __('A scan placed while loading was moved to the tray.'), indicator: 'orange' });
     }
 }
 
@@ -335,7 +348,7 @@ onMounted(async () => {
 });
 
 // Exposed so the parent can trigger Save via the Ctrl/Cmd+Enter shortcut.
-defineExpose({ save: validateUpdadeScannedDetails });
+defineExpose({ save });
 
 </script>
 

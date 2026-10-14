@@ -1,7 +1,6 @@
 """Tool-calling model loop with a shared tool budget, a deadline and credential redaction."""
 
 import json
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -110,19 +109,13 @@ class AgentRun:
 			def build(adapter, credentials, model):
 				return adapter.build_turn(credentials, model, system, messages, schema, options, definitions, final)
 
-			outcome = client.try_model(account, model, build, self.get_turn_options(options), context)
+			outcome = client.try_model(account, model, build, options, context, self.deadline)
 			calls = outcome["result"]["tool_calls"] if outcome["ok"] else []
 			if not calls:
 				return outcome
 			if final:
 				return {"ok": False, "retryable": False, "error": frappe._("Model called tools after the limit")}
 			messages.extend(adapter.continuation(outcome["result"]["response"], self.run_tools(calls)))
-
-	def get_turn_options(self, options: dict) -> dict:
-		remaining = self.deadline - time.monotonic()
-		if remaining <= 0:
-			raise TimeoutError(frappe._("The AI time budget for this document is used up"))
-		return {**options, "timeout": max(1, min(options["timeout"], int(remaining)))}
 
 	def run_tools(self, calls: list[dict]) -> list[tuple[dict, str]]:
 		outputs = []

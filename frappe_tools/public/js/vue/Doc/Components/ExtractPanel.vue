@@ -36,7 +36,7 @@
 
             <div v-if="images.length" class="ex-thumbs">
                 <div v-for="(img, i) in images" :key="i" class="ex-thumb">
-                    <img :src="img" alt="" />
+                    <img :src="img.attachment" alt="" />
                     <button class="ex-thumb-x" @click="removeImage(i)" title="Remove">&times;</button>
                     <span class="ex-thumb-no">{{ i + 1 }}</span>
                 </div>
@@ -120,7 +120,7 @@ async function startExtraction() {
     try {
         const r = await frappe.call({
             method: 'frappe_tools.api.doc_extract.extract_document',
-            args: { target_doctype: props.target_doctype, images: JSON.stringify(images.value) },
+            args: { target_doctype: props.target_doctype, images: JSON.stringify(images.value.map((img) => img.attachment)) },
         })
         extractionName.value = r.message.extraction
         stage.value = 'extracting'

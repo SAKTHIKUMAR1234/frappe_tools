@@ -102,12 +102,12 @@ class TestAiBotPermission(FrappeTestCase):
 
 
 class TestAppPermission(FrappeTestCase):
-	"""The apps screen shows Frappe Tools to its managers and scanner users only."""
+	"""The apps screen shows Frappe Tools to its managers, scanner users and verifier users only."""
 
 	def test_allowed_roles_see_app(self):
 		import frappe_tools
 
-		for role in frappe_tools.APP_ROLES:
+		for role in ("System Manager", "Scanner User", "Accounts Manager"):
 			with patch.object(frappe_tools.frappe, "get_roles", return_value=[role]):
 				frappe.set_user("Guest")
 				self.assertTrue(frappe_tools.check_app_permission())

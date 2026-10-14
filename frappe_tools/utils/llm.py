@@ -28,9 +28,9 @@ def call_vision(
 	extraction: str | None = None, target_doctype: str | None = None,
 	phase: str | None = None, reference_doctype: str | None = None,
 	reference_name: str | None = None, run_id: str | None = None, min_output_tokens: int = 0,
-	task: str = "Document Extraction",
+	task: str = "Document Extraction", deadline: float | None = None,
 ) -> dict:
-	"""Call the configured task model with images."""
+	"""Call the configured task model with images; no request runs past `deadline` (time.monotonic())."""
 	from frappe_tools.ai.client import call_model
 
 	return call_model(
@@ -45,6 +45,7 @@ def call_vision(
 		reference_name=reference_name,
 		run_id=run_id,
 		min_output_tokens=min_output_tokens,
+		deadline=deadline,
 	)
 
 

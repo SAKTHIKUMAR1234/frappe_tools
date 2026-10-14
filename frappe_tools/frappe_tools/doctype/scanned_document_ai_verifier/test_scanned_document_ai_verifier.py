@@ -8,7 +8,6 @@ from unittest.mock import Mock, call, patch
 
 import frappe
 from frappe.tests import UnitTestCase
-from frappe.utils.xlsxutils import make_xlsx
 from openpyxl import load_workbook
 
 from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
@@ -16,6 +15,7 @@ from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
 )
 
 READ_CHECKPOINTS = verifier._result_rows
+MAKE_WORKBOOK = verifier.make_workbook
 
 
 class TestScannedDocumentAIVerifier(UnitTestCase):
@@ -37,6 +37,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			check_permission=Mock(),
 		)
 		self.meta = frappe._dict(
+			name="Purchase Invoice",
 			issingle=0,
 			istable=0,
 			is_virtual=0,
@@ -51,7 +52,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 					options="Purchase Invoice Item",
 				),
 				frappe._dict(fieldname="terms", label="Terms", fieldtype="Text Editor"),
-				frappe._dict(fieldname="secret", label="Secret", fieldtype="Password"),
+				frappe._dict(fieldname="secret", label="Secret", fieldtype="Data"),
 			],
 		)
 		self.child_meta = frappe._dict(
@@ -115,7 +116,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.loader = self.enterContext(patch.object(verifier, "get_document_pages", side_effect=self.stored_pages))
 		self.xlsx = self.enterContext(
 			patch.object(
-				verifier, "make_xlsx", return_value=BytesIO(b"local-test-xlsx")
+				verifier, "make_workbook", return_value=BytesIO(b"local-test-xlsx")
 			)
 		)
 		self.save_file = self.enterContext(
@@ -132,7 +133,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		]
 		self.columns = verifier.FIXED_COLUMNS + self.value_columns
 
-	def stored_pages(self, doctype, name):
+	def stored_pages(self, doctype, name, deadline=None):
 		return [{"page_no": number, "section": "Invoice", "document_number": f"{name}-{number}"}
 			for number in range(1, self.page_counts.get(name, 1) + 1)]
 
@@ -152,9 +153,10 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 					"doctype": doctype,
 					"name": name,
 					"total_qty": 12,
-					"items": [{"qty": 12, "owner": "Administrator"}],
+					"items": [{"qty": 12, "owner": "Administrator", "access_token": "do not send"}],
 					"terms": "<p>terms</p>",
 					"secret": "do not send",
+					"api_key": "do not send",
 					"owner": "Administrator",
 					"_comments": "metadata",
 					"large_text": "x" * 3000,
@@ -277,7 +279,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.get_list.return_value = ["PI-OK", "PI-NONE", "PI-FAIL", "PI-AFTER"]
 		self.get_all.side_effect = [["SCAN-1", "SCAN-2"], [], ["SCAN-BAD"], ["SCAN-3"]]
 		self.page_counts["PI-NONE"] = 0
-		def pages(doctype, name):
+		def pages(doctype, name, deadline=None):
 			if name == "SCAN-BAD":
 				raise RuntimeError("Page unavailable")
 			return self.stored_pages(doctype, name)
@@ -335,7 +337,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			["PI-FAIL", "SCAN-BAD", "Failed", "Page unavailable", None, None, None],
 			["PI-AFTER", "SCAN-3", "Completed", "Weight unreadable", None, 12, None],
 		]
-		self.xlsx.assert_called_once_with(expected_rows, "Verification")
+		self.xlsx.assert_called_once_with(expected_rows)
 		self.save_file.assert_called_once_with(
 			f"{self.doc.name}.xlsx",
 			b"local-test-xlsx",
@@ -416,18 +418,13 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 				"scanned_documents": "SCAN-1",
 				"status": "Completed",
 				"remarks": '=HYPERLINK("https://local.invalid")',
-				"scan_weight": 10.5,
+				"scan_weight": "Name <a@b.c>",
 				"total_qty": 12,
 				"difference": None,
-			}
+			},
+			{"document": "PI-2", "status": "Failed", "remarks": "Key <redacted> rejected"},
 		]
-		with (
-			patch.object(verifier, "make_xlsx", wraps=make_xlsx),
-			patch(
-				"frappe.utils.xlsxutils.XLSXStyleBuilder.get_datetime_format",
-				return_value="yyyy-mm-dd",
-			),
-		):
+		with patch.object(verifier, "make_workbook", wraps=MAKE_WORKBOOK):
 			verifier._save_results(self.doc, self.columns, rows)
 		workbook = load_workbook(BytesIO(self.save_file.call_args.args[1]))
 		self.addCleanup(workbook.close)
@@ -436,17 +433,35 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			list(sheet.values),
 			[
 				tuple(column["label"] for column in self.columns),
-				("PI-1", "SCAN-1", "Completed", rows[0]["remarks"], 10.5, 12, None),
+				("PI-1", "SCAN-1", "Completed", rows[0]["remarks"], "Name <a@b.c>", 12, None),
+				("PI-2", None, "Failed", "Key <redacted> rejected", None, None, None),
 			],
 		)
 		self.assertEqual(sheet["D2"].data_type, "s")
 
+	def test_denied_reference_doctype_is_rejected(self):
+		self.meta.fields.append(frappe._dict(fieldname="password", label="Password", fieldtype="Password"))
+		self.doc.status = "Completed"
+		with self.assertRaises(frappe.ValidationError):
+			verifier.run_verifier(self.doc.name)
+		self.enqueue.assert_not_called()
+
+	def test_run_time_limit_fails_later_rows_and_stops_page_reads(self):
+		self.get_all.return_value = ["SCAN-1"]
+		row = verifier._document_row(self.doc, "PI-LATE", self.columns, run_deadline=0.001)
+		self.assertEqual(row["status"], "Failed")
+		self.assertIn("time limit", row["remarks"])
+		self.loader.assert_not_called()
+		self.vision.assert_not_called()
+
+		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": ""}}
+		verifier._document_row(self.doc, "PI-1", self.columns, run_deadline=10**12)
+		self.loader.assert_called_once_with("Scanned Document", "SCAN-1", deadline=10**12)
+
 	def test_empty_batch_creates_header_only_excel(self):
 		with patch.object(verifier, "decide_columns", return_value=self.columns):
 			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
-		self.xlsx.assert_called_once_with(
-			[[column["label"] for column in self.columns]], "Verification"
-		)
+		self.xlsx.assert_called_once_with([[column["label"] for column in self.columns]])
 		self.assertEqual(self.doc.status, "Completed")
 		self.assertEqual(self.doc.total_documents, 0)
 		self.vision.assert_not_called()
@@ -510,14 +525,14 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		verifier._document_row(self.doc, "PI-1", self.columns)
 		self.assertEqual(len(json.loads(self.vision.call_args.args[2])["pages"]), 27)
 		self.assertEqual(self.loader.call_args_list, [
-			call("Scanned Document", "SCAN-1"), call("Scanned Document", "SCAN-2"), call("Scanned Document", "SCAN-3"),
+			call("Scanned Document", scan, deadline=None) for scan in ("SCAN-1", "SCAN-2", "SCAN-3")
 		])
 
 	def test_document_without_scan_uses_its_attached_files(self):
 		self.page_counts["PI-1"] = 22
 		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": "Matches"}}
 		row = verifier._document_row(self.doc, "PI-1", self.columns)
-		self.loader.assert_called_once_with("Purchase Invoice", "PI-1")
+		self.loader.assert_called_once_with("Purchase Invoice", "PI-1", deadline=None)
 		pages = json.loads(self.vision.call_args.args[2])["pages"]
 		self.assertEqual(len(pages), 22)
 		self.assertNotIn("scanned_document", pages[0])
@@ -552,8 +567,7 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 			[
 				[column["label"] for column in self.columns],
 				["PI-1", "SCAN-1", "Completed", "", 10, 12, 2],
-			],
-			"Verification",
+			]
 		)
 		self.db.set_value.assert_called_with(
 			verifier.DOCTYPE, self.doc.name, "result_file", "/private/files/test.xlsx"

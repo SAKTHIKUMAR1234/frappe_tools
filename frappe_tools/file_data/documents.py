@@ -1,23 +1,31 @@
 """Ordered pages of a document from the page data stored on its Files."""
 
+import time
+
 import frappe
 
+from frappe_tools.ai.client import DeadlineReached
 from frappe_tools.file_data.reader import FILE, FILE_FIELDS, file_kind, read_file
 
 SCAN = "Scanned Document"
 DETAIL = "Scanned Document Detail"
+# Front sorts before Back of the same page.
+PAGE_ORDER = "page_no asc, page_type desc, name asc"
 
 
-def get_document_pages(doctype: str, name: str) -> list[dict]:
+def get_document_pages(doctype: str, name: str, deadline: float | None = None) -> list[dict]:
 	"""Return all ordered pages of a document.
 
 	A Scanned Document uses the files of its active pages; any other document uses its attached
-	images and PDFs. Unread files are read now. Needs read permission on the document.
+	images and PDFs. Unread files are read now, but none starts after `deadline` (time.monotonic()).
+	Needs read permission on the document.
 	"""
 	context = _read_context(doctype, name)
 	pages, errors = [], []
 	for file, extra in _document_files(doctype, name):
-		data = read_file(file.name, retry_failed=True, context=context)
+		if deadline and not file.ai_page_data and time.monotonic() > deadline:
+			raise DeadlineReached("The time limit was reached before all files were read. Try again later.")
+		data = read_file(file.name, retry_failed=True, context=context, deadline=deadline)
 		if data is None:
 			errors.append(f"{file.file_name or file.name}: {_error(file.name)}")
 			continue
@@ -33,11 +41,16 @@ def files_for_document(doctype: str, name: str) -> list[str]:
 
 
 def scan_files(scanned_document: str) -> list[tuple[dict, dict | None]]:
-	"""Return (detail, File or None) for each active page of a scan, in page order."""
-	details = frappe.get_all(DETAIL, filters={"scanner_document": scanned_document, "is_deleted": 0},
-		fields=["name", "attachment", "title"], order_by="page_no asc, name asc")
+	"""Return (detail, File or None) for each active page with an attachment, in page order."""
+	details = frappe.get_all(DETAIL, filters=active_page_filters(scanned_document),
+		fields=["name", "attachment", "title"], order_by=PAGE_ORDER)
 	files = files_by_url([detail.attachment for detail in details if detail.attachment])
 	return [(detail, files.get(detail.attachment)) for detail in details]
+
+
+def active_page_filters(scanned_document: str) -> dict:
+	"""Filters for the pages of a scan that hold an image; empty scanner slots are skipped."""
+	return {"scanner_document": scanned_document, "is_deleted": 0, "attachment": ["is", "set"]}
 
 
 def files_by_url(urls: list[str]) -> dict[str, dict]:

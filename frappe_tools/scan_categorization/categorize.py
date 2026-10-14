@@ -11,6 +11,7 @@ from frappe.utils import add_to_date, cint, get_datetime, now_datetime
 from frappe.utils.background_jobs import is_job_enqueued
 
 from frappe_tools.api.doc_classify import _layout_sections, load_classification_pages
+from frappe_tools.file_data.documents import active_page_filters
 from frappe_tools.file_data.reader import data_values
 from frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail import attach_files
 from frappe_tools.scan_categorization.decisions import SHAPES, decide_layout, decide_sections
@@ -184,7 +185,7 @@ def _can_queue(scan, manual):
 			return False
 	elif scan.ai_check_status and not manual:
 		return False
-	active = frappe.db.exists(DETAIL, {"scanner_document": scan.name, "is_deleted": 0})
+	active = frappe.db.exists(DETAIL, active_page_filters(scan.name))
 	return bool(active) and not has_unread_pages(scan.name)
 
 
@@ -331,6 +332,7 @@ def _apply(scan, result, outcome):
 	created, applied = [], False
 	frappe.db.savepoint("scan_apply")
 	try:
+		retire_taken_slots(scan.name, result.positions)
 		for index, detail in enumerate(result.details):
 			values = result.positions[index].copy()
 			if detail.name in result.corrections:
@@ -343,6 +345,16 @@ def _apply(scan, result, outcome):
 			frappe.db.rollback(save_point="scan_apply")
 			for file in created:
 				file.on_rollback()
+
+
+def retire_taken_slots(scan_name, positions):
+	"""Retire each empty scanner slot at a position that a page now takes, so one row holds each position."""
+	taken = {(position["title"], position["page_no"], position["page_type"]) for position in positions}
+	slots = frappe.get_all(DETAIL, filters={"scanner_document": scan_name, "is_deleted": 0, "attachment": ["is", "not set"]},
+		fields=["name", "title", "page_no", "page_type"])
+	for slot in slots:
+		if (slot.title, slot.page_no, slot.page_type) in taken:
+			frappe.db.set_value(DETAIL, slot.name, "is_deleted", 1)
 
 
 def _save_correction(scan, result, index, created, outcome):

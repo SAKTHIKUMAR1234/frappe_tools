@@ -2,6 +2,7 @@
 
 import json
 import mimetypes
+import time
 from base64 import b64encode
 from io import BytesIO
 
@@ -10,6 +11,7 @@ import pypdfium2
 from frappe.utils import add_to_date, cint, get_datetime, now_datetime
 from rq.timeouts import JobTimeoutException
 
+from frappe_tools.ai.client import DeadlineReached
 from frappe_tools.extractors.pipeline import file_to_data_url
 from frappe_tools.file_data.extraction import extract_pages
 from frappe_tools.i2a.extract import _read_file
@@ -32,10 +34,13 @@ def file_kind(file: dict) -> str | None:
 	return "image" if mime.startswith("image/") else None
 
 
-def read_file(file_name: str, retry_failed: bool = False, context: dict | None = None) -> dict | None:
+def read_file(
+	file_name: str, retry_failed: bool = False, context: dict | None = None, deadline: float | None = None,
+) -> dict | None:
 	"""Return the stored {"pages": [...]} of a File, reading it first when a read is due.
 
 	Holds no lock during the model call and commits after a read. Returns None when the File stays unread.
+	Raises DeadlineReached when `deadline` (time.monotonic()) ends the read; the File stays unread.
 	"""
 	file = frappe.db.get_value(FILE, file_name, FILE_FIELDS, as_dict=True)
 	if not file:
@@ -45,10 +50,8 @@ def read_file(file_name: str, retry_failed: bool = False, context: dict | None =
 	if not (retry_failed or is_retry_due(file)):
 		return None
 
-	values = _read_values(file, context or {})
-	if not _save(file, values) or not values.get("ai_page_data"):
-		return None
-	return frappe.parse_json(values["ai_page_data"])
+	stored = _save(file, _read_values(file, context or {}, deadline))
+	return frappe.parse_json(stored) if stored else None
 
 
 def retry_cutoff():
@@ -73,10 +76,10 @@ def data_values(data: dict, model: str | None) -> dict:
 	}
 
 
-def _read_values(file, context):
+def _read_values(file, context, deadline):
 	try:
-		return _copied_values(file) or data_values(*_read_pages(file, context))
-	except JobTimeoutException:
+		return _copied_values(file) or data_values(*_read_pages(file, context, deadline))
+	except (JobTimeoutException, DeadlineReached):
 		raise
 	except Exception as exc:  # One unreadable file must not stop the other files.
 		return {"ai_page_error": str(exc)[:1000], "ai_page_error_on": now_datetime(),
@@ -93,12 +96,14 @@ def _copied_values(file):
 	return data_values(frappe.parse_json(source.ai_page_data), source.ai_page_model) if source else None
 
 
-def _read_pages(file, context):
-	"""Read each page in its own model call."""
+def _read_pages(file, context, deadline):
+	"""Read each page in its own model call; no call starts after `deadline`."""
 	images = _page_images(file)
 	pages, model = [], None
 	for number, image in enumerate(images, 1):
-		[page], model = extract_pages([image], **context)
+		if deadline and time.monotonic() > deadline:
+			raise DeadlineReached(f"The time limit was reached while reading {file.file_name or file.name}. Try again later.")
+		[page], model = extract_pages([image], deadline=deadline, **context)
 		pages.append({**page, "page_no": number})
 	return {"pages": pages}, model
 
@@ -123,13 +128,16 @@ def _pdf_page_image(page):
 
 
 def _save(file, values):
-	"""Write under a short File row lock when the File is unchanged and still unread."""
+	"""Write under a short File row lock when the File is unchanged and unread; return its stored page data.
+
+	When another worker stored the data first, return that data.
+	"""
 	current = frappe.db.get_value(FILE, file.name, ["file_url", "content_hash", "ai_page_data"],
 		as_dict=True, for_update=True)
-	unchanged = bool(current) and not current.ai_page_data and (
-		(current.file_url, current.content_hash) == (file.file_url, file.content_hash)
-	)
-	if unchanged:
+	unchanged = bool(current) and (current.file_url, current.content_hash) == (file.file_url, file.content_hash)
+	if unchanged and not current.ai_page_data:
 		frappe.db.set_value(FILE, file.name, values, update_modified=False)
 	frappe.db.commit()
-	return unchanged
+	if not unchanged:
+		return None
+	return current.ai_page_data or values.get("ai_page_data")
