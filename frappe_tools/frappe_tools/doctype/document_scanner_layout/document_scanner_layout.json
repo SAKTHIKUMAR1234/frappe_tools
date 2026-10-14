@@ -9,6 +9,7 @@
   "section_break_01dq",
   "layout_name",
   "is_catch_all",
+  "auto_capture",
   "ai_description",
   "layout_doctype",
   "layout_doctype_sections",
@@ -60,6 +61,14 @@
    "description": "Staff file unsorted bills here. AI categorization never picks this layout and moves its scans to a specific layout."
   },
   {
+   "fieldname": "auto_capture",
+   "fieldtype": "Check",
+   "label": "Auto-capture",
+   "default": "0",
+   "allow_on_submit": 1,
+   "description": "Scans drop straight into the layout as new pages. When off, scans wait in Unused Scans for drag and drop."
+  },
+  {
    "fieldname": "ai_description",
    "fieldtype": "Small Text",
    "label": "AI Description",
@@ -71,7 +80,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-10-14 11:31:37.307681",
+ "modified": "2026-10-14 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Scanner Layout",

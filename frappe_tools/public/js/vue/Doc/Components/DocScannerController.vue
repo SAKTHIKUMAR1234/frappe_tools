@@ -54,19 +54,17 @@
                     <span class="doc-info-bar-sep">&middot;</span>
                     <span class="doc-info-bar-value">{{ localDocname }}</span>
                 </div>
-                <label class="auto-capture-toggle" title="When ON, each scan drops straight into a new page — no carousel, no dragging">
-                    <input type="checkbox" v-model="autoCapture" />
-                    <span class="auto-capture-slider"></span>
-                    <span class="auto-capture-label">Auto-capture</span>
-                </label>
+                <span v-if="autoCapture" class="auto-capture-badge" title="This layout places each scan as a new page">
+                    Auto-capture on
+                </span>
                 <button class="doc-info-bar-btn" @click="startNewScan">
                     Change Document
                 </button>
             </div>
             <div class="main_container">
-                <UnsedImagesCarrosal v-if="!autoCapture" style="width : 60%" :images="dragStore.imagesList" @remove="removeImage"
+                <UnsedImagesCarrosal v-if="showTray" style="width : 60%" :images="dragStore.imagesList" @remove="removeImage"
                     @update:images="val => imagesList = val" />
-                <MainLayoutHandler ref="layoutHandlerRef" :style="{ width: autoCapture ? '70%' : '40%' }" :is_new="localIsNew" :document_name="localDocname"
+                <MainLayoutHandler ref="layoutHandlerRef" :style="{ width: showTray ? '40%' : '70%' }" :is_new="localIsNew" :document_name="localDocname"
                     :scan_name="props.scan_name" :doctype="localDoctype" @newScan="startNewScan"
                     @created="localIsNew = false" />
                 <DocumentListViewer v-if="localDocname && localDoctype"
@@ -99,7 +97,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useSessionStore } from '../../Store/docscanner_store'
 import { useGloabalDragMemory } from '../../Store/doc_scanner_drag_drop_memory';
 import QRCode from 'qrcode';
@@ -116,7 +114,9 @@ const qrcodeCanvas = ref(null);
 const origin = window.location.origin;
 const isScanning = ref(false);
 const scanMode = ref(null);
-const autoCapture = ref(true);
+const autoCapture = computed(() => Boolean(dragStore.document_scanner_details?.auto_capture));
+// Leftover or removed scans stay reachable even on an auto-capture layout.
+const showTray = computed(() => !autoCapture.value || dragStore.imagesList.length > 0);
 const layoutHandlerRef = ref(null);
 
 const props = defineProps({
@@ -366,15 +366,15 @@ function handleDataMessage(e) {
             const dataUrl = `data:image/jpeg;base64,${base64}`;
 
             if (autoCapture.value && scanMode.value === 'template') {
-                // Auto-capture: skip the carousel, append straight into the layout.
+                // Layout auto-captures: skip the tray, append straight into the layout.
                 const placed = dragStore.appendScannedPage(dataUrl);
                 if (placed) {
                     nextTick(scrollNewestPageIntoView);
                 } else {
-                    // No layout/section selected yet — fall back to carousel.
+                    // Layout has no section — keep the scan in the tray.
                     dragStore.setImagesDetails([...dragStore.imagesList, dataUrl]);
                     frappe.show_alert(
-                        { message: __('Select a Document Layout first — scan kept in Unused Scans'), indicator: 'orange' },
+                        { message: __('This layout has no section — scan kept in Unused Scans'), indicator: 'orange' },
                         7
                     );
                 }
@@ -1144,58 +1144,15 @@ defineExpose({ handleSignals })
     border-color: #cbd5e1;
 }
 
-/* ── Auto-capture Toggle ── */
-.auto-capture-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0 4px 0 auto;
-    cursor: pointer;
-    user-select: none;
-}
-
-.auto-capture-toggle input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.auto-capture-slider {
-    position: relative;
-    width: 36px;
-    height: 20px;
+/* ── Auto-capture Indicator ── */
+.auto-capture-badge {
+    margin: 0 8px 0 auto;
+    padding: 2px 10px;
     border-radius: 999px;
-    background: #cbd5e1;
-    transition: background 0.15s ease;
-    flex-shrink: 0;
-}
-
-.auto-capture-slider::after {
-    content: "";
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-    transition: transform 0.15s ease;
-}
-
-.auto-capture-toggle input:checked + .auto-capture-slider {
-    background: #4f46e5;
-}
-
-.auto-capture-toggle input:checked + .auto-capture-slider::after {
-    transform: translateX(16px);
-}
-
-.auto-capture-label {
+    background: #eef2ff;
     font-size: 12px;
     font-weight: 600;
-    color: #475569;
+    color: #4f46e5;
 }
 
 /* ── Main Container ── */

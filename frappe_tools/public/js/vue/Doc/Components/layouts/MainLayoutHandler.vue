@@ -272,6 +272,7 @@ function getSectionDetails(sections) {
 const constructLayoutDetails = async (layout_doc) => {
     await dragMem.setDocScannerDetails({
         "layout": layout_doc.name,
+        "auto_capture": layout_doc.auto_capture,
         "sections": getSectionDetails(layout_doc.layout_doctype_sections)
     })
     if (currScannerDetails.value) {
