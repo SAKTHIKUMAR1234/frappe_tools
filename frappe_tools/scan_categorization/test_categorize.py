@@ -139,9 +139,7 @@ class TestCategorize(UnitTestCase):
 			self.set_file(detail, {"ai_page_data": None})
 
 	def scan_pages(self, name):
-		pages, omitted = get_document_pages(flow.SCAN, name)
-		self.assertEqual(omitted, 0)
-		return pages
+		return get_document_pages(flow.SCAN, name)
 
 	def returned(self, pages):
 		return [{**page, "page_no": number, "section": self.titles[0]} for number, page in enumerate(pages, 1)]
@@ -633,7 +631,7 @@ class TestCategorize(UnitTestCase):
 			[self.file(detail).name for detail in reversed(self.details)])
 
 	def test_empty_scan_returns_no_pages(self):
-		self.assertEqual(get_document_pages(flow.SCAN, self.new_scan().name), ([], 0))
+		self.assertEqual(get_document_pages(flow.SCAN, self.new_scan().name), [])
 		self.vision_mock.assert_not_called()
 
 	def test_page_data_needs_read_permission_on_linked_document(self):
@@ -779,8 +777,7 @@ class TestCategorize(UnitTestCase):
 
 	def test_verifier_uses_stored_pages_and_reads_only_missing_ones(self):
 		self.clear_pages(self.details[1:])
-		pages, omitted = verifier._load_pages("Purchase Invoice", self.bill.name, [self.scan.name])
-		self.assertEqual(omitted, 0)
+		pages = verifier._load_pages("Purchase Invoice", self.bill.name, [self.scan.name])
 		self.assertEqual(pages, [{"scanned_document": self.scan.name, **page} for page in self.returned(self.pages)])
 		self.vision_mock.assert_called_once()
 		self.assertEqual(self.vision_mock.call_args.args[0], [file_to_data_url(self.details[1].attachment)])
@@ -831,12 +828,10 @@ class TestCategorize(UnitTestCase):
 
 		frappe.db.set_single_value(flow.SETTINGS, "ai_confidence_threshold", None)
 		frappe.db.set_single_value(flow.SETTINGS, "ai_batch_limit", None)
-		frappe.db.set_single_value(flow.SETTINGS, "ai_max_pages", None)
 		frappe.db.set_single_value(flow.SETTINGS, "page_extraction_batch_limit", None)
 		execute()
 		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_confidence_threshold"), 0.8)
 		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_batch_limit"), 200)
-		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "ai_max_pages"), 30)
 		self.assertEqual(frappe.db.get_single_value(flow.SETTINGS, "page_extraction_batch_limit"), 500)
 		frappe.db.set_single_value(flow.SETTINGS, "ai_confidence_threshold", 0)
 		frappe.db.set_single_value(flow.SETTINGS, "ai_batch_limit", 10)
@@ -1055,15 +1050,6 @@ class TestCategorize(UnitTestCase):
 					self.assertEqual(enqueue.call_args.kwargs["run_id"], self.scan.ai_run_id)
 					self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
 
-	def test_page_limit_requires_review_without_ai(self):
-		self.settings.ai_max_pages = 1
-		flow.categorize_scan(self.scan.name, self.scan.ai_run_id)
-		self.assertEqual(self.scan.reload().ai_check_status, "Needs Review")
-		self.assertIn("2 pages", self.scan.ai_error)
-		self.vision_mock.assert_not_called()
-		self.post.assert_not_called()
-		self.model.assert_not_called()
-
 	def test_section_positions_match_scanner_shapes(self):
 		for kind in ("Series Vertical", "Front And Back Vertical", "Front And Back Horizontal"):
 			with self.subTest(kind=kind):
@@ -1163,6 +1149,7 @@ class TestCategorize(UnitTestCase):
 
 class TestDecisions(UnitTestCase):
 	def setUp(self):
+		self.enterContext(patch.object(decisions, "MAX_INPUT_TOKENS", 26000))  # small budget keeps size tests fast
 		self.layouts = {"Bill": [{"title": "Invoice", "layout_type": "Single Page"}]}
 		self.sections = {"Invoice": "Single Page", "Receipt": "Series Vertical"}
 		self.answer = {"layout": "Bill", "confidence": 0.91, "reason": "Tax invoice"}
@@ -1215,7 +1202,7 @@ class TestDecisions(UnitTestCase):
 
 	def test_oversized_state_never_calls_model(self):
 		state = {"text": "x" * int(decisions.MAX_INPUT_TOKENS * 3.5)}
-		with self.assertRaisesRegex(ValueError, "26,000-token budget after shrinking"):
+		with self.assertRaisesRegex(ValueError, "token budget after shrinking"):
 			decisions.decide_layout(state, self.layouts, "Purchase Invoice")
 		self.model.assert_not_called()
 

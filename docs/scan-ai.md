@@ -16,7 +16,7 @@ The PDF button on a scanned document opens a large dialog in the same page. The 
 
 A vision model reads each file once and stores the page data as JSON on the File, in the AI Data section (AI Page Data). The data has the form `{"pages": [...]}`. The categorization and the verifier use this stored data. They do not send page images again.
 
-- An image file has 1 page. The app renders each page of a PDF file as an image. It reads at most 20 pages of one PDF. The data notes the other pages in `omitted_pages`, and AI Page Count shows all pages of the file.
+- An image file has 1 page. The app renders each page of a PDF file as an image. It reads every page. AI Page Count shows the number of pages.
 - One vision call reads one page. The page data has the document fields, parties, references, items, the printed item table (all columns and rows), taxes, totals, other labelled fields, handwritten notes, signatures and stamps, and the full page text.
 - The values are copied as printed. Missing values are null.
 - When another File with the same content already has data, the app copies that data and makes no vision call.
@@ -70,7 +70,6 @@ The scheduler runs the job every day at 03:00. The job queues the scans that are
 | AI Confidence Threshold | 0.8 | Minimum layout confidence (0 to 1) to apply the result. |
 | AI Batch Limit | 200 | Maximum scans for each night. |
 | AI Process Since | Blank | Only scans created on or after this date. Blank includes all unchecked scans. |
-| AI Max Pages | 30 | Scans with more pages are not processed and get Needs Review. |
 
 ### Buttons on a Scanned Document
 
@@ -89,7 +88,7 @@ The buttons are in the AI group. Only a System Manager, or a user who can write 
 |---|---|
 | Queued | The scan waits for a worker. A scan that stays Queued for 6 hours can be queued again. |
 | Done | The result was applied, or a user marked the scan as reviewed. |
-| Needs Review | The app did not apply the result. For example, the confidence is below the threshold or the scan has too many pages. A user must check the scan. |
+| Needs Review | The app did not apply the result. For example, the confidence is below the threshold. A user must check the scan. |
 | Failed | An error stopped the check. The error is in the AI Error field. |
 
 ## Scanned Document AI Verifier
@@ -131,7 +130,7 @@ For each document the model gets the document, its page data and four read-only 
 | get_document | One document with its child tables. `_links` gives the DocType of each filled Link field, so the model can follow it. |
 | get_list | Up to 50 rows of any readable DocType. Filters can use the fields of the DocType or of its child tables. |
 | get_doctype_fields | The fields of a DocType or child table, with the Link target or child table in options. |
-| get_document_pages | The stored page data of a document (at most 20 pages). Unread files are read first. |
+| get_document_pages | The stored page data of all pages of a document. Unread files are read first. |
 
 The tools run as the user who clicked Run, with the normal Frappe permission checks and field-level read permissions. The tools cannot write, run SQL, call methods, run reports, download files or make HTTP calls. Each document allows at most 12 tool calls. Each tool result is cut at 20,000 characters. The model calls and tool calls of one document share the 150-second budget. The final answer must match a strict JSON schema with one value for each column and the remarks.
 
@@ -160,7 +159,7 @@ The app saves each finished row as it goes. When a run is Failed and the columns
 
 ### Limits
 
-- Each document uses at most 20 pages. The Remarks column shows how many pages were left out.
+- Each document uses all of its pages.
 - The job timeout is 150 seconds for each document. The minimum is 10 minutes and the maximum is 6 hours.
 - Each document allows at most 12 tool calls.
 

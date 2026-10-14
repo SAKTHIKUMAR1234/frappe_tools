@@ -132,12 +132,9 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		]
 		self.columns = verifier.FIXED_COLUMNS + self.value_columns
 
-	def stored_pages(self, doctype, name, limit):
-		count = self.page_counts.get(name, 1)
-		taken = min(count, limit)
-		pages = [{"page_no": number, "section": "Invoice", "document_number": f"{name}-{number}"}
-			for number in range(1, taken + 1)]
-		return pages, count - taken
+	def stored_pages(self, doctype, name):
+		return [{"page_no": number, "section": "Invoice", "document_number": f"{name}-{number}"}
+			for number in range(1, self.page_counts.get(name, 1) + 1)]
 
 	def _get_meta(self, doctype):
 		return self.child_meta if doctype == "Purchase Invoice Item" else self.meta
@@ -280,10 +277,10 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 		self.get_list.return_value = ["PI-OK", "PI-NONE", "PI-FAIL", "PI-AFTER"]
 		self.get_all.side_effect = [["SCAN-1", "SCAN-2"], [], ["SCAN-BAD"], ["SCAN-3"]]
 		self.page_counts["PI-NONE"] = 0
-		def pages(doctype, name, limit):
+		def pages(doctype, name):
 			if name == "SCAN-BAD":
 				raise RuntimeError("Page unavailable")
-			return self.stored_pages(doctype, name, limit)
+			return self.stored_pages(doctype, name)
 
 		self.loader.side_effect = pages
 		self.vision.side_effect = [
@@ -506,28 +503,25 @@ class TestScannedDocumentAIVerifier(UnitTestCase):
 					verifier._document_row(self.doc, "PI-1", self.columns)
 		self.assertFalse(self.checkpoints)
 
-	def test_verifier_omits_pages_after_twenty(self):
+	def test_verifier_sends_every_page_of_every_scan(self):
 		self.get_all.return_value = ["SCAN-1", "SCAN-2", "SCAN-3"]
 		self.page_counts.update({"SCAN-1": 12, "SCAN-2": 12, "SCAN-3": 3})
 		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": "Matches"}}
-		row = verifier._document_row(self.doc, "PI-1", self.columns)
-		self.assertEqual(len(json.loads(self.vision.call_args.args[2])["pages"]), 20)
+		verifier._document_row(self.doc, "PI-1", self.columns)
+		self.assertEqual(len(json.loads(self.vision.call_args.args[2])["pages"]), 27)
 		self.assertEqual(self.loader.call_args_list, [
-			call("Scanned Document", "SCAN-1", limit=20), call("Scanned Document", "SCAN-2", limit=8),
-			call("Scanned Document", "SCAN-3", limit=0),
+			call("Scanned Document", "SCAN-1"), call("Scanned Document", "SCAN-2"), call("Scanned Document", "SCAN-3"),
 		])
-		self.assertIn("7 pages omitted", row["remarks"])
 
 	def test_document_without_scan_uses_its_attached_files(self):
 		self.page_counts["PI-1"] = 22
 		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": "Matches"}}
 		row = verifier._document_row(self.doc, "PI-1", self.columns)
-		self.loader.assert_called_once_with("Purchase Invoice", "PI-1", limit=20)
+		self.loader.assert_called_once_with("Purchase Invoice", "PI-1")
 		pages = json.loads(self.vision.call_args.args[2])["pages"]
-		self.assertEqual(len(pages), 20)
+		self.assertEqual(len(pages), 22)
 		self.assertNotIn("scanned_document", pages[0])
 		self.assertEqual((row["status"], row["scanned_documents"]), ("Completed", ""))
-		self.assertIn("2 pages omitted", row["remarks"])
 
 	def test_lost_permission_at_job_start_fails_the_run(self):
 		self.has_permission.side_effect = frappe.PermissionError("Read denied")

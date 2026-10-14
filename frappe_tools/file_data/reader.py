@@ -15,7 +15,6 @@ from frappe_tools.file_data.extraction import extract_pages
 from frappe_tools.i2a.extract import _read_file
 
 FILE = "File"
-MAX_FILE_PAGES = 20
 MAX_AUTO_ATTEMPTS = 3
 RETRY_AFTER_HOURS = 6
 PDF_RENDER_SCALE = 2
@@ -68,28 +67,10 @@ def is_retry_due(file: dict) -> bool:
 def data_values(data: dict, model: str | None) -> dict:
 	"""Return the File field values that store `data` and clear any earlier error."""
 	return {
-		"ai_page_data": json.dumps(data, ensure_ascii=False), "ai_page_count": page_total(data),
+		"ai_page_data": json.dumps(data, ensure_ascii=False), "ai_page_count": len(data["pages"]),
 		"ai_page_data_on": now_datetime(), "ai_page_model": model, "ai_page_error": None,
 		"ai_page_error_on": None, "ai_page_attempts": 0,
 	}
-
-
-def page_total(data: dict) -> int:
-	"""Pages in the file, also the pages over MAX_FILE_PAGES that were not read."""
-	return len(data["pages"]) + cint(data.get("omitted_pages"))
-
-
-def page_count(file: dict) -> int:
-	"""Pages in a File without a model call."""
-	if file.ai_page_data:
-		return cint(file.ai_page_count)
-	if file_kind(file) != "pdf":
-		return 1
-	pdf = pypdfium2.PdfDocument(_read_file(file.file_url)[0])
-	try:
-		return len(pdf)
-	finally:
-		pdf.close()
 
 
 def _read_values(file, context):
@@ -114,26 +95,23 @@ def _copied_values(file):
 
 def _read_pages(file, context):
 	"""Read each page in its own model call."""
-	images, total = _page_images(file)
+	images = _page_images(file)
 	pages, model = [], None
 	for number, image in enumerate(images, 1):
 		[page], model = extract_pages([image], **context)
 		pages.append({**page, "page_no": number})
-	data = {"pages": pages}
-	if total > len(images):
-		data["omitted_pages"] = total - len(images)
-	return data, model
+	return {"pages": pages}, model
 
 
 def _page_images(file):
 	kind = file_kind(file)
 	if kind == "image":
-		return [file_to_data_url(file.file_url)], 1
+		return [file_to_data_url(file.file_url)]
 	if kind != "pdf":
 		raise ValueError("Only image and PDF files can be read")
 	pdf = pypdfium2.PdfDocument(_read_file(file.file_url)[0])
 	try:
-		return [_pdf_page_image(pdf[index]) for index in range(min(len(pdf), MAX_FILE_PAGES))], len(pdf)
+		return [_pdf_page_image(page) for page in pdf]
 	finally:
 		pdf.close()
 

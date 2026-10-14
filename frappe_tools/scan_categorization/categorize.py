@@ -220,13 +220,8 @@ def _context(scan):
 
 
 def _compute(scan, outcome, directory):
-	settings, threshold = _settings()
+	_settings_doc, threshold = _settings()
 	outcome["threshold"] = threshold
-	count = frappe.db.count(DETAIL, {"scanner_document": scan.name, "is_deleted": 0})
-	limit = cint(settings.ai_max_pages) or 30
-	if count > limit:
-		outcome["reason"] = f"Scan has {count} pages; AI Max Pages is {limit}."
-		return None
 	details, images = load_classification_pages(scan.name)
 	if not details:
 		raise ValueError("No active pages to categorize")

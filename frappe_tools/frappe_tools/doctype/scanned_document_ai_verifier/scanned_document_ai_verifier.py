@@ -25,7 +25,6 @@ from frappe_tools.utils.llm import log_call
 DOCTYPE = "Scanned Document AI Verifier"
 EVENT = "scan_ai_verifier_progress"
 ACTIVE_STATUSES = ("Queued", "Running")
-MAX_PAGES = 20
 DOCUMENT_SECONDS = 150
 ROW_RULES = (
 	'Return only {"values": {"column_key": value}, "remarks": "..."}. Use only the requested value columns. '
@@ -298,7 +297,7 @@ def _verify_document(verifier, row, columns):
 	doc.check_permission("read")
 	scans = _scan_names(verifier.reference_doctype, doc.name)
 	row["scanned_documents"] = ", ".join(scans)
-	pages, omitted = _load_pages(verifier.reference_doctype, doc.name, scans)
+	pages = _load_pages(verifier.reference_doctype, doc.name, scans)
 	if not pages:
 		row.update(status="No attachment", remarks="No scanned pages or attached files found.")
 		return
@@ -319,8 +318,6 @@ def _verify_document(verifier, row, columns):
 		reference_doctype=DOCTYPE, reference_name=verifier.name, run_id=verifier.last_run_id,
 	)["data"]
 	row.update(_response_values(response, value_columns))
-	if omitted:
-		row["remarks"] = f"{row['remarks']} {omitted} pages omitted ({MAX_PAGES}-page limit).".strip()
 
 
 def _row_schema(columns):
@@ -363,15 +360,10 @@ def _scan_names(doctype, name):
 
 
 def _load_pages(doctype, name, scans):
-	"""Return up to MAX_PAGES pages of the scans, or of the attached files when there is no scan."""
+	"""Return the pages of the scans, or of the attached files when there is no scan."""
 	if not scans:
-		return get_document_pages(doctype, name, limit=MAX_PAGES)
-	pages, omitted = [], 0
-	for scan in scans:
-		scan_pages, scan_omitted = get_document_pages(SCAN, scan, limit=MAX_PAGES - len(pages))
-		pages.extend({"scanned_document": scan, **page} for page in scan_pages)
-		omitted += scan_omitted
-	return pages, omitted
+		return get_document_pages(doctype, name)
+	return [{"scanned_document": scan, **page} for scan in scans for page in get_document_pages(SCAN, scan)]
 
 
 def _trim_document(data, doctype):

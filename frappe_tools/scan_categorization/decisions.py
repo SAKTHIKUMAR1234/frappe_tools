@@ -12,7 +12,7 @@ from frappe_tools.frappe_tools.doctype.document_extraction_settings.document_ext
 
 TASK = "Scan Decision"
 # Input safety limit, not a model choice: about 3.5 characters for each token.
-MAX_INPUT_TOKENS = 26000
+MAX_INPUT_TOKENS = 200000
 # Scanner UI layout shapes (public/js/vue/Doc/Components/layouts).
 SHAPES = {
 	"Single Page": "one page only",
@@ -102,7 +102,7 @@ def bounded_state(state: dict, request: str) -> dict:
 			return state
 		shrink(state.get("pages", []))
 	if estimated_tokens(state, request) > MAX_INPUT_TOKENS:
-		raise ValueError("Decision request exceeds the 26,000-token budget after shrinking page data.")
+		raise ValueError("Decision request exceeds the 200,000-token budget after shrinking page data.")
 	return state
 
 
