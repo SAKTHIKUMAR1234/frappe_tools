@@ -11,7 +11,7 @@ app_license = "mit"
 # required_apps = []
 
 app_logo_url = "/assets/frappe_tools/images/frappe-tools-logo.svg"
-app_home = "/desk/scanning"
+app_home = "/desk/scanner"
 
 add_to_apps_screen = [
 	{

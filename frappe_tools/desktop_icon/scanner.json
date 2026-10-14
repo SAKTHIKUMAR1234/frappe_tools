@@ -1,0 +1,22 @@
+{
+ "app": "frappe_tools",
+ "bg_color": "blue",
+ "creation": "2026-10-14 20:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon": "scanner-document-duotone",
+ "icon_type": "Link",
+ "idx": 1,
+ "label": "Scanner",
+ "link_to": "Scanner",
+ "link_type": "Workspace Sidebar",
+ "modified": "2026-10-14 20:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "Scanner",
+ "owner": "Administrator",
+ "parent_icon": "Frappe Tools",
+ "restrict_removal": 0,
+ "roles": [],
+ "standard": 1
+}

@@ -1,0 +1,19 @@
+{
+ "app": "frappe_tools",
+ "creation": "2026-10-14 20:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 1,
+ "icon_type": "App",
+ "idx": 100,
+ "label": "Frappe Tools",
+ "link": "/desk/scanner",
+ "link_type": "External",
+ "logo_url": "/assets/frappe_tools/images/frappe-tools-logo.svg",
+ "modified": "2026-10-14 20:00:00.000000",
+ "modified_by": "Administrator",
+ "name": "Frappe Tools",
+ "owner": "Administrator",
+ "roles": [],
+ "standard": 1
+}
