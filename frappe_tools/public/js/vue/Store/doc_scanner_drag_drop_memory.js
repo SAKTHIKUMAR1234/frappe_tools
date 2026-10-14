@@ -14,7 +14,7 @@ function placeScan(section, dataUrl) {
   const images = section.images;
   const slot = findEmptySlot(images);
   if (slot) {
-    slot.attachment = dataUrl;
+    Object.assign(slot, { attachment: dataUrl, detail: null });
     return slot;
   }
   if (section.section_type === "Single Page" && images.length) return null;
@@ -69,48 +69,40 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
       this.curr_page_type = hover_type;
     },
 
+    // The hovered section slot; null for the tray.
+    dropSlot() {
+      if (this.curr_page_section == "un_used_section") return null;
+      const images = this.document_scanner_details.sections?.[this.curr_page_section]?.images || [];
+      return images.find(
+        (img) => img.page_no == this.curr_page_no && img.page_type == this.curr_page_type
+      ) || null;
+    },
+
     dragEnd() {
-      if (!this.is_dragging) {
+      const slot = this.dropSlot();
+      // A scan can fill the hovered slot during the drag: keep both images by cancelling the move.
+      if (!this.is_dragging || slot?.attachment) {
         this.reset();
         return;
       }
+      // An image moves with its stored detail, so a save keeps its current file and original.
       let curr_image = null;
       if (this.drag_image_section == "un_used_section") {
         curr_image = this.imagesList.splice(this.drag_image_page_no, 1)[0];
       } else {
-        for(let i= 0 ;i<this.document_scanner_details['sections'][this.drag_image_section]['images'].length;i++){
-          let image = this.document_scanner_details['sections'][this.drag_image_section]['images'][i];
-          if(image['page_no'] == this.drag_image_page_no && image['page_type'] == this.drag_image_page_type){
-            curr_image = image['attachment'];
-            image['attachment'] = null;
-            break;
-          }
+        const image = this.document_scanner_details.sections[this.drag_image_section].images.find(
+          (img) => img.page_no == this.drag_image_page_no && img.page_type == this.drag_image_page_type
+        );
+        if (image) {
+          curr_image = { attachment: image.attachment, detail: image.detail || null };
+          Object.assign(image, { attachment: null, detail: null });
         }
       }
 
       if (this.curr_page_section == "un_used_section") {
         this.imagesList.splice(this.curr_page_no, 0, curr_image);
-      } else {
-        for (
-          let i = 0;
-          i <
-          this.document_scanner_details.sections[this.curr_page_section][
-            "images"
-          ].length;
-          i++
-        ) {
-          let section =
-            this.document_scanner_details.sections[this.curr_page_section][
-              "images"
-            ][i];
-          if (
-            section["page_no"] == this.curr_page_no &&
-            section["page_type"] == this.curr_page_type
-          ) {
-            section["attachment"] = curr_image;
-            break;
-          }
-        }
+      } else if (slot) {
+        Object.assign(slot, { attachment: curr_image?.attachment || null, detail: curr_image?.detail || null });
       }
 
       this.reset();
@@ -173,11 +165,12 @@ export const useGloabalDragMemory = defineStore("drag_and_drop_memory", {
       return null;
     },
 
+    // Tray images are { attachment, detail }; a new scan may be given as its data URL.
     async setImagesDetails(images) {
       this.imagesList = [];
       for (const e of images) {
-        const dataUrl = await imageToDataURL(e);
-        this.imagesList.push(dataUrl);
+        const image = typeof e === "string" ? { attachment: e, detail: null } : e;
+        this.imagesList.push({ ...image, attachment: await imageToDataURL(image.attachment) });
       }
     },
     reset() {

@@ -252,6 +252,7 @@ def load_scanned_document_details(docname):
 
 	query = f"""
 		SELECT 
+			t1.name AS detail,
 			t1.page_no,
 			t1.attachment,
 			t1.layout_type,
@@ -268,7 +269,7 @@ def load_scanned_document_details(docname):
 			ON t3.file_url = t1.attachment
 		WHERE t1.is_deleted = 0
 		  AND t2.name = {frappe.db.escape(docname)}
-		ORDER BY t1.page_no ASC
+		ORDER BY t1.page_no ASC, t1.page_type DESC, (t1.attachment IS NULL OR t1.attachment = '') ASC, t1.name ASC
 		"""
 	attachments = frappe.db.sql(
 		query,
@@ -286,6 +287,9 @@ def load_scanned_document_details(docname):
 		attach = {
 			"page_no": i["page_no"],
 			"attachment": i["attachment"],
+			# The scanner sends detail back for an unchanged page; older clients send file_url.
+			"detail": i["detail"],
+			"file_url": i["attachment"],
 			"page_type": i["page_type"],
 			"layout_type": i["layout_type"],
 			"title": i["title"]
@@ -333,25 +337,32 @@ def upload_image(image_data):
 	doc.save(ignore_permissions=True)
 
 	attachment = image_data.get("attachment")
-	if attachment:
-		if attachment.startswith("data:"):
-			# New base64 image - upload it
-			file_doc = create_image_upload(
-				attachment,
-				"Scanned Document Detail",
-				doc.name
-			)
-			doc.db_set("attachment", file_doc.file_url)
-		else:
-			# Existing file URL - set it directly without re-uploading
-			doc.db_set("attachment", attachment)
-			original = frappe.db.get_value(
-				"Scanned Document Detail", {"attachment": attachment, "is_deleted": 0}, "original_attachment",
-			)
-			if original:
-				doc.db_set("original_attachment", original)
+	if image_data.get("detail") or (attachment and not attachment.startswith("data:")):
+		# A stored page: copy the current files of its detail, read now, so a moved or replaced file is kept.
+		source = get_source_detail(image_data.get("detail"), attachment)
+		doc.db_set({"attachment": source.attachment, "original_attachment": source.original_attachment})
+	elif attachment:
+		file_doc = create_image_upload(attachment, "Scanned Document Detail", doc.name)
+		doc.db_set("attachment", file_doc.file_url)
 
 	return doc.name
+
+
+def get_source_detail(detail: str | None, file_url: str | None) -> frappe._dict:
+	"""Return the live, attached page that a scanner save keeps; older clients send its file_url.
+
+	Needs print permission on the document of its scan.
+	"""
+	filters = {"name": detail} if detail else {"attachment": file_url}
+	source = frappe.db.get_value("Scanned Document Detail", {**filters, "is_deleted": 0},
+		["attachment", "original_attachment", "scanner_document"], as_dict=True)
+	if not source or not source.attachment:
+		frappe.throw(frappe._("A page of this scan was changed. Reload the scan and save again."))
+
+	scan = frappe.db.get_value("Scanned Document", source.scanner_document, ["_doctype", "_docname"], as_dict=True)
+	if not scan or not frappe.has_permission(scan._doctype, doc=scan._docname, ptype="print"):
+		frappe.throw(frappe._("You do not have permission to use this page."), frappe.PermissionError)
+	return source
 
 
 def create_image_upload(attach, doctype, docname, fieldname="attachment"):

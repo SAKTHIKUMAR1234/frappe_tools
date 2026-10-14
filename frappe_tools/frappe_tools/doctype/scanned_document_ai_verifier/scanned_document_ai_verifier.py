@@ -4,18 +4,20 @@
 import json
 import re
 import time
+from io import BytesIO
 
 import frappe
+import xlsxwriter
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, get_datetime, now_datetime, time_diff_in_seconds
 from frappe.utils.file_manager import save_file
-from frappe.utils.xlsxutils import make_xlsx
+from frappe.utils.xlsxutils import ILLEGAL_CHARACTERS_RE
 from rq.timeouts import JobTimeoutException
 
 from frappe_tools.ai.agent import call_agent
 from frappe_tools.ai.client import call_model
-from frappe_tools.ai.tools import READ_TOOLS
+from frappe_tools.ai.tools import READ_TOOLS, is_denied_doctype, is_sensitive_field
 from frappe_tools.file_data.documents import SCAN, get_document_pages
 from frappe_tools.frappe_tools.doctype.document_extraction_settings.document_extraction_settings import (
 	get_prompt,
@@ -86,6 +88,8 @@ def _validate_options(doc):
 	meta = frappe.get_meta(doc.reference_doctype)
 	if meta.issingle or meta.istable or meta.is_virtual:
 		frappe.throw(_("Choose a regular document DocType."))
+	if is_denied_doctype(meta):
+		frappe.throw(_("AI cannot read {0} documents.").format(doc.reference_doctype))
 	if bool(doc.get("ai_account")) != bool(doc.get("model")):
 		frappe.throw(_("Set both AI Account and Model, or leave both blank."))
 
@@ -185,6 +189,8 @@ def _fail_run(doc):
 
 
 def _run_batch(doc):
+	# Keep time for the last document before the job timeout.
+	run_deadline = time.monotonic() + _timeout(doc) - 2 * DOCUMENT_SECONDS
 	names = frappe.get_list(doc.reference_doctype, filters=_parse_filters(doc.filters_data),
 		pluck="name", limit=cint(doc.max_documents), order_by="creation asc")
 	try:
@@ -196,7 +202,7 @@ def _run_batch(doc):
 	_publish_progress(doc)
 	frappe.db.commit()
 	for index, name in enumerate(names, 1):
-		row = _document_row(doc, name, columns)
+		row = _document_row(doc, name, columns, run_deadline)
 		frappe.db.commit()
 		_update(doc, processed_documents=index,
 			failed_documents=cint(doc.failed_documents) + (row["status"] == "Failed"))
@@ -269,7 +275,7 @@ def decide_columns(
 def _field_labels(doctype):
 	fields = []
 	for field in frappe.get_meta(doctype).fields:
-		if field.fieldtype in OMITTED_TYPES or not field.label:
+		if field.fieldtype in OMITTED_TYPES or not field.label or is_sensitive_field(field.fieldname):
 			continue
 		entry = {"key": field.fieldname, "label": field.label}
 		if field.fieldtype in ("Table", "Table MultiSelect"):
@@ -278,10 +284,10 @@ def _field_labels(doctype):
 	return fields
 
 
-def _document_row(verifier, name, columns):
+def _document_row(verifier, name, columns, run_deadline=None):
 	row = {"document": name, "scanned_documents": "", "status": "Completed", "remarks": ""}
 	try:
-		_verify_document(verifier, row, columns)
+		_verify_document(verifier, row, columns, run_deadline)
 	except JobTimeoutException:
 		raise
 	except Exception as exc:  # One bad document must not stop the batch.
@@ -290,18 +296,20 @@ def _document_row(verifier, name, columns):
 	return row
 
 
-def _verify_document(verifier, row, columns):
+def _verify_document(verifier, row, columns, run_deadline=None):
 	"""Fill `row` in place so a later failure keeps the scan names."""
-	deadline = time.monotonic() + DOCUMENT_SECONDS
+	if run_deadline and time.monotonic() > run_deadline:
+		raise TimeoutError("The run time limit was reached. Run the verifier again for this document.")
 	doc = frappe.get_doc(verifier.reference_doctype, row["document"])
 	doc.check_permission("read")
 	scans = _scan_names(verifier.reference_doctype, doc.name)
 	row["scanned_documents"] = ", ".join(scans)
-	pages = _load_pages(verifier.reference_doctype, doc.name, scans)
+	pages = _load_pages(verifier.reference_doctype, doc.name, scans, run_deadline)
 	if not pages:
 		row.update(status="No attachment", remarks="No scanned pages or attached files found.")
 		return
 
+	deadline = time.monotonic() + DOCUMENT_SECONDS
 	doc.apply_fieldlevel_read_permissions()
 	value_columns = columns[len(FIXED_COLUMNS):]
 	response = call_agent(
@@ -359,11 +367,12 @@ def _scan_names(doctype, name):
 	return list(dict.fromkeys(scans))
 
 
-def _load_pages(doctype, name, scans):
+def _load_pages(doctype, name, scans, deadline=None):
 	"""Return the pages of the scans, or of the attached files when there is no scan."""
 	if not scans:
-		return get_document_pages(doctype, name)
-	return [{"scanned_document": scan, **page} for scan in scans for page in get_document_pages(SCAN, scan)]
+		return get_document_pages(doctype, name, deadline=deadline)
+	return [{"scanned_document": scan, **page} for scan in scans
+		for page in get_document_pages(SCAN, scan, deadline=deadline)]
 
 
 def _trim_document(data, doctype):
@@ -371,7 +380,7 @@ def _trim_document(data, doctype):
 	result = {}
 	for key, value in data.items():
 		field = fields.get(key)
-		if key.startswith("_") or key in META_FIELDS:
+		if key.startswith("_") or key in META_FIELDS or is_sensitive_field(key):
 			continue
 		if field and field.fieldtype in OMITTED_TYPES:
 			continue
@@ -402,7 +411,7 @@ def _response_values(response, columns):
 def _save_results(doc, columns, rows):
 	data = [[column["label"] for column in columns]]
 	data.extend([[row.get(column["key"]) for column in columns] for row in rows])
-	output = make_xlsx(data, "Verification")
+	output = make_workbook(data)
 	return save_file(
 		f"{doc.name}.xlsx",
 		output.getvalue(),
@@ -411,6 +420,22 @@ def _save_results(doc, columns, rows):
 		is_private=1,
 		df="result_file",
 	)
+
+
+def make_workbook(data: list[list]) -> BytesIO:
+	"""Write text cells as literal strings: no HTML conversion and no formulas."""
+	output = BytesIO()
+	with xlsxwriter.Workbook(output, {"constant_memory": True}) as workbook:
+		sheet = workbook.add_worksheet("Verification")
+		sheet.set_row(0, cell_format=workbook.add_format({"bold": True}))
+		for row_index, row in enumerate(data):
+			for column_index, value in enumerate(row):
+				if isinstance(value, str):
+					sheet.write_string(row_index, column_index, ILLEGAL_CHARACTERS_RE.sub("", value))
+				else:
+					sheet.write(row_index, column_index, value)
+	output.seek(0)
+	return output
 
 
 def _update(doc, **values):

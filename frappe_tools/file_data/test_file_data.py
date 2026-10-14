@@ -7,6 +7,8 @@ import frappe
 from frappe.tests import UnitTestCase
 from PIL import Image
 
+from frappe_tools.ai import client
+from frappe_tools.ai.client import DeadlineReached, bounded_options
 from frappe_tools.file_data import reader
 from frappe_tools.file_data.documents import files_for_document, get_document_pages
 from frappe_tools.file_data.extraction import PAGE_SCHEMA
@@ -14,6 +16,7 @@ from frappe_tools.patches import move_scan_page_data_to_file
 from frappe_tools.utils import llm, save_file_always_new
 
 DETAIL = "Scanned Document Detail"
+CALL_VISION = llm.call_vision
 
 
 def image_content(fmt="PNG") -> bytes:
@@ -78,6 +81,67 @@ class TestFileData(UnitTestCase):
 		self.assertEqual(reader.read_file(copy.name), frappe.parse_json(self.stored(first).ai_page_data))
 		self.assertEqual(self.stored(copy).ai_page_model, "local/test-model")
 		self.vision.assert_called_once()
+
+	def test_data_stored_by_another_worker_during_the_read_is_returned(self):
+		file = self.attach(image_content(), "png")
+		other = {"pages": [{**deepcopy(PAGE_SCHEMA), "document_number": "other-worker", "page_no": 1}]}
+
+		def read_while_another_worker_saves(*args, **kwargs):
+			frappe.db.set_value("File", file.name, reader.data_values(other, "local/other"), update_modified=False)
+			return self.read_image(*args, **kwargs)
+
+		self.vision.side_effect = read_while_another_worker_saves
+		self.assertEqual(reader.read_file(file.name), other)
+		self.assertEqual(self.stored(file).ai_page_model, "local/other")
+
+	def test_no_file_read_starts_after_the_deadline(self):
+		self.attach(image_content(), "png")
+		with self.assertRaisesRegex(TimeoutError, "time limit"):
+			get_document_pages("ToDo", self.todo.name, deadline=0.001)
+		self.vision.assert_not_called()
+		pages = get_document_pages("ToDo", self.todo.name)
+		self.assertEqual(get_document_pages("ToDo", self.todo.name, deadline=0.001), pages)
+
+	def test_deadline_stops_a_pdf_between_pages_and_keeps_it_unread(self):
+		file = self.attach(pdf_content(3), "pdf")
+		# The clock passes the deadline once the first page is read.
+		with (
+			patch.object(reader.time, "monotonic", side_effect=lambda: 10 if self.vision.call_count else 0),
+			self.assertRaisesRegex(DeadlineReached, "time limit"),
+		):
+			get_document_pages("ToDo", self.todo.name, deadline=5)
+		self.vision.assert_called_once()
+		self.assertEqual(self.vision.call_args.kwargs["deadline"], 5)
+		stored = frappe.db.get_value("File", file.name, ["ai_page_data", "ai_page_error", "ai_page_attempts"], as_dict=True)
+		self.assertEqual((stored.ai_page_data, stored.ai_page_error, stored.ai_page_attempts), (None, None, 0))
+
+	def test_budget_ending_during_a_request_keeps_the_file_unread(self):
+		file = self.attach(image_content(), "png")
+		self.vision.side_effect = CALL_VISION
+		settings = frappe._dict(enable=1, model="local/test-model", max_attempts=1, get_api_key=lambda: "local-test-key")
+		now = [1000.0]
+
+		def timed_out(*args, **kwargs):
+			now[0] += 30
+			raise client.requests.Timeout("Local read timeout")
+
+		with (
+			patch.object(llm, "ensure_ready", return_value=settings),
+			patch.object(client.requests, "post", side_effect=timed_out),
+			patch.object(client.time, "monotonic", side_effect=lambda: now[0]),
+			self.assertRaises(DeadlineReached),
+		):
+			get_document_pages("ToDo", self.todo.name, deadline=now[0] + 10)
+		stored = frappe.db.get_value("File", file.name, ["ai_page_data", "ai_page_error", "ai_page_attempts"], as_dict=True)
+		self.assertEqual((stored.ai_page_data, stored.ai_page_error, stored.ai_page_attempts), (None, None, 0))
+
+	def test_request_timeout_ends_by_the_deadline(self):
+		self.assertEqual(bounded_options({"timeout": 120}, None), {"timeout": 120})
+		with patch.object(client.time, "monotonic", return_value=100):
+			self.assertEqual(bounded_options({"timeout": 120}, 130), {"timeout": 30})
+			self.assertAlmostEqual(bounded_options({"timeout": 120}, 100.4)["timeout"], 0.4)
+			with self.assertRaises(DeadlineReached):
+				bounded_options({"timeout": 120}, 100)
 
 	def test_document_files_are_images_and_pdfs_in_field_then_creation_order(self):
 		late = self.attach(image_content(), "png")

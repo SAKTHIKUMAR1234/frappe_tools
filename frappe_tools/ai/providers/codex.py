@@ -1,9 +1,10 @@
 """ChatGPT Codex Responses stream."""
 
 import json
+import time
 
 import frappe
-from requests import Response
+from requests import Response, Timeout
 
 from frappe_tools.ai.providers import ProviderError, error_message, token_usage
 
@@ -49,9 +50,10 @@ def build_turn(
 	return (account.get("base_url") or BASE_URL).rstrip("/") + "/codex/responses", headers, body
 
 
-def parse_response(response: Response) -> tuple:
+def parse_response(response: Response, deadline: float | None = None) -> tuple:
+	"""Read the event stream; raise Timeout when `deadline` (time.monotonic()) passes while reading."""
 	deltas, items = [], []
-	for event in _events(response):
+	for event in _events(response, deadline):
 		kind = event.get("type")
 		if kind in ("error", "response.failed", "response.incomplete"):
 			result = event.get("response") or event
@@ -72,8 +74,10 @@ def parse_response(response: Response) -> tuple:
 	raise ProviderError(frappe._("Codex stream ended without response.completed"))
 
 
-def _events(response):
+def _events(response, deadline):
 	for line in response.iter_lines():
+		if deadline is not None and time.monotonic() >= deadline:
+			raise Timeout(frappe._("The AI time budget ended while the answer was streamed"))
 		if isinstance(line, bytes):
 			line = line.decode("utf-8")
 		if line.startswith("data:"):

@@ -33,6 +33,10 @@ frappe.ui.form.on("Scanned Document AI Verifier", {
 				if (frm.scan_verifier_starting) return;
 				frm.scan_verifier_starting = true;
 				try {
+					// An inline filter change (such as the condition) does not mark the form dirty.
+					if (frm.scan_filter_group) {
+						await frm.set_value("filters_data", JSON.stringify(frm.scan_filter_group.get_filters()));
+					}
 					if (frm.is_new() || frm.is_dirty()) await frm.save();
 					await frappe.call({
 						method: "frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier.scanned_document_ai_verifier.run_verifier",
