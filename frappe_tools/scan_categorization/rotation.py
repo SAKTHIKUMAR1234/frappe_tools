@@ -27,7 +27,7 @@ def detect_skew(image: np.ndarray) -> float:
 	if lines is None:
 		return 0.0
 	angles = []
-	for x1, y1, x2, y2 in lines[:, 0]:
+	for x1, y1, x2, y2 in lines.reshape(-1, 4):  # OpenCV 4 returns (N, 1, 4), OpenCV 5 returns (N, 4).
 		angle = math.degrees(math.atan2(int(y2 - y1), int(x2 - x1)))
 		angle = (angle + 90) % 180 - 90
 		if abs(angle) < 45:
