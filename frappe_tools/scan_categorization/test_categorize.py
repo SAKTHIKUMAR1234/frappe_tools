@@ -7,6 +7,7 @@ import cv2
 import frappe
 from frappe.tests import UnitTestCase
 
+from frappe_tools.ai.test_providers import ai_task_rows
 from frappe_tools.ai.test_providers import response as provider_response
 from frappe_tools.api.doc_classify import load_classification_pages
 from frappe_tools.extractors.pipeline import file_to_data_url
@@ -66,7 +67,7 @@ class TestCategorize(UnitTestCase):
 		self.patch = patch.object(flow, "_settings", return_value=(self.settings, 0.8))
 		self.patch.start()
 		self.addCleanup(self.patch.stop)
-		self.ready = patch.object(llm, "ensure_ready", return_value=Mock(get_api_key=lambda: "local-test-key"))
+		self.ready = patch.object(llm, "ensure_ready", return_value=Mock())
 		self.ready.start()
 		self.addCleanup(self.ready.stop)
 		self.pages = [page_data(1, rotation=90), page_data(2, document_type="Delivery Challan")]
@@ -516,7 +517,7 @@ class TestCategorize(UnitTestCase):
 	def test_truncated_response_saves_error_not_partial_data(self):
 		self.clear_pages(self.details[:1])
 		self.vision.stop()
-		settings = frappe._dict(model="local/test-vision", max_attempts=1, get_api_key=lambda: "local-test-key")
+		settings = frappe._dict(max_attempts=1, task_models=ai_task_rows("local/test-vision"))
 		response = provider_response({"choices": [{"message": {"content": json.dumps({"pages": self.pages[:1]})},
 			"finish_reason": "length"}]})
 		self.post.side_effect = None
@@ -572,8 +573,7 @@ class TestCategorize(UnitTestCase):
 	def test_vision_uses_json_mode_and_logs_full_response(self):
 		self.vision.stop()
 		self.clear_pages(self.details[:1])
-		settings = frappe._dict(model="local/test-vision", max_attempts=1, max_tokens=8000,
-			request_timeout=30, get_api_key=lambda: "local-test-key")
+		settings = frappe._dict(max_attempts=1, request_timeout=30, task_models=ai_task_rows("local/test-vision", max_tokens=8000))
 		response = provider_response({
 			"choices": [{"message": {"content": json.dumps({"pages": self.pages[:1]})}, "finish_reason": "stop"}],
 			"usage": {"prompt_tokens": 100, "completion_tokens": 300, "total_tokens": 400},
@@ -919,8 +919,7 @@ class TestCategorize(UnitTestCase):
 		}).insert()
 		self.vision.stop()
 		settings = frappe.get_single("Document Extraction Settings")
-		settings.update(dict(enable=1, model="local/test-verifier", max_attempts=1, task_models=[]))
-		self.enterContext(patch.object(settings, "get_api_key", return_value="local-test-key"))
+		settings.update(dict(enable=1, max_attempts=1, task_models=ai_task_rows("local/test-verifier")))
 		responses = []
 		for data in ({"columns": [{"key": "quantity", "label": "Quantity"}]},
 			{"values": {"quantity": 5}, "remarks": "Matches"}):
@@ -955,11 +954,11 @@ class TestCategorize(UnitTestCase):
 		self.addCleanup(workbook.close)
 		self.assertEqual(list(workbook.active.values)[1][-1], 5)
 
-	def test_vision_legacy_call_and_retry_metadata(self):
+	def test_vision_call_and_retry_metadata(self):
 		import requests
 
 		self.vision.stop()
-		settings = frappe._dict(model="local/test-compatibility", max_attempts=2, get_api_key=lambda: "local-test-key")
+		settings = frappe._dict(max_attempts=2, task_models=ai_task_rows("local/test-compatibility"))
 		response = provider_response({"choices": [{"message": {"content": '{"quantity": 5}'}}]})
 		context = {"phase": "Page Extraction", "reference_doctype": flow.SCAN,
 			"reference_name": self.scan.name, "run_id": frappe.generate_hash(length=12)}
@@ -967,7 +966,7 @@ class TestCategorize(UnitTestCase):
 		with patch.object(llm, "ensure_ready", return_value=settings), patch("frappe_tools.ai.client.time.sleep"):
 			self.assertEqual(llm.call_vision([], "Read", "Quantity")["data"], {"quantity": 5})
 			self.assertEqual(llm.call_vision([], "Read", "Quantity", **context)["data"], {"quantity": 5})
-		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={"model": f"OpenRouter/{settings.model}"},
+		logs = frappe.get_all(llm.CALL_LOG_DOCTYPE, filters={"model": "OpenRouter/local/test-compatibility"},
 			fields=["phase", "reference_doctype", "reference_name", "run_id", "status"], order_by="creation asc")
 		self.assertEqual(len(logs), 3)
 		self.assertTrue(all(not logs[0][key] for key in context))
@@ -1179,7 +1178,7 @@ class TestCategorize(UnitTestCase):
 		from rq.timeouts import JobTimeoutException
 
 		self.vision.stop()
-		settings = frappe._dict(model="local/test-timeout", max_attempts=3, get_api_key=lambda: "local-key")
+		settings = frappe._dict(max_attempts=3, task_models=ai_task_rows("local/test-timeout"))
 		self.post.side_effect = JobTimeoutException("local worker deadline")
 		with patch.object(llm, "ensure_ready", return_value=settings), self.assertRaises(JobTimeoutException):
 			llm.call_vision([], "Read", "Quantity")

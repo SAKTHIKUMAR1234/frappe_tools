@@ -1,6 +1,7 @@
 import json
 from unittest.mock import Mock
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from frappe_tools.ai.providers import ProviderError, anthropic, codex, openrouter
@@ -20,6 +21,17 @@ def response(result: dict | None = None, status: int = 200, events: list | None 
 	mock.iter_content.return_value = [json.dumps(result or {}).encode()]
 	mock.iter_lines.return_value = [b"data: " + json.dumps(event).encode() for event in events or []]
 	return mock
+
+
+def ai_task_rows(model_id: str, **model_fields) -> list[dict]:
+	"""Insert a local OpenRouter account and AI Model; return one enabled AI Task Models row per task."""
+	from frappe_tools.ai.client import TASKS
+
+	account = frappe.get_doc(dict(doctype="AI Provider Account", account_name="LOCAL-" + frappe.generate_hash(length=10),
+		provider="OpenRouter", auth_type="API Key", api_key="local-test-key", enabled=1)).insert()
+	model = frappe.get_doc(dict(doctype="AI Model", model_label=f"{account.name} {model_id}", account=account.name,
+		model_id=model_id, supports_vision=1, **model_fields)).insert()
+	return [frappe._dict(task=task, ai_model=model.name, enabled=1) for task in TASKS]
 
 
 class TestProviders(UnitTestCase):
@@ -149,3 +161,49 @@ class TestProviders(UnitTestCase):
 		args[4] = ["https://example.test/image.png"]
 		with self.assertRaises(ValueError):
 			anthropic.build_request(*args)
+
+	def test_json_mode_off_drops_json_format_and_instruction(self):
+		options = dict(temperature=0, max_tokens=100, json_mode=False)
+		for adapter in (openrouter, codex, anthropic):
+			with self.subTest(adapter=adapter.__name__):
+				body = adapter.build_turn(self.account, "model", "System", [], None, options)[2]
+				self.assertNotIn("response_format", body)
+				self.assertNotIn("JSON", json.dumps(body))
+
+	def test_chat_messages_convert_for_each_provider(self):
+		messages = [
+			{"role": "system", "content": "Rules"},
+			{"role": "user", "content": [{"type": "text", "text": "Read"}, {"type": "image_url", "image_url": {"url": IMAGE}}]},
+			{"role": "assistant", "content": "", "tool_calls": [
+				{"id": "call_1", "type": "function", "function": {"name": "find", "arguments": '{"q": "x"}'}}]},
+			{"role": "tool", "tool_call_id": "call_1", "content": "found"},
+		]
+		system, turns = openrouter.chat_messages(messages)
+		self.assertEqual((system, turns), ("Rules", messages[1:]))
+
+		system, items = codex.chat_messages(messages)
+		self.assertEqual(system, "Rules")
+		self.assertEqual(items[0]["content"][1], {"type": "input_image", "image_url": IMAGE})
+		self.assertEqual(items[1], {"type": "function_call", "call_id": "call_1", "name": "find", "arguments": '{"q": "x"}'})
+		self.assertEqual(items[2], {"type": "function_call_output", "call_id": "call_1", "output": "found"})
+
+		system, turns = anthropic.chat_messages(messages)
+		self.assertEqual([turn["role"] for turn in turns], ["user", "assistant", "user"])
+		self.assertEqual(turns[0]["content"][1]["source"]["data"], "bG9jYWw=")
+		self.assertEqual(turns[1]["content"], [{"type": "tool_use", "id": "call_1", "name": "find", "input": {"q": "x"}}])
+		self.assertEqual(turns[2]["content"][0]["tool_use_id"], "call_1")
+
+	def test_chat_messages_reject_unsupported_parts(self):
+		audio = [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "x", "format": "wav"}}]}]
+		for adapter in (codex, anthropic):
+			with self.subTest(adapter=adapter.__name__), self.assertRaises(ValueError):
+				adapter.chat_messages(audio)
+
+	def test_assistant_message_is_openai_chat_shape(self):
+		reply = {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "function": {"name": "f", "arguments": "{}"}}]}
+		self.assertEqual(openrouter.assistant_message({"choices": [{"message": reply}]}, ""), reply)
+		result = {"output": [{"type": "function_call", "call_id": "c", "name": "f", "arguments": "{}"}]}
+		message = codex.assistant_message(result, "")
+		self.assertEqual(message["tool_calls"][0]["function"], {"name": "f", "arguments": "{}"})
+		message = anthropic.assistant_message({"content": [{"type": "tool_use", "id": "c", "name": "f", "input": {"a": 1}}]}, "")
+		self.assertEqual(message["tool_calls"][0]["function"]["arguments"], '{"a": 1}')

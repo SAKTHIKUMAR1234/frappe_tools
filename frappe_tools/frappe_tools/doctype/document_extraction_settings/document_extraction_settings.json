@@ -5,9 +5,6 @@
  "engine": "InnoDB",
  "field_order": [
   "enable",
-  "provider",
-  "model",
-  "openrouter_api_key",
   "ai_providers_section",
   "task_models",
   "ai_prompts_section",
@@ -15,9 +12,7 @@
   "scan_decision_prompt",
   "verifier_system_prompt",
   "advanced_section",
-  "max_tokens",
   "request_timeout",
-  "temperature",
   "max_attempts",
   "embedding_section",
   "enable_embeddings",
@@ -34,51 +29,15 @@
    "label": "Enable Document Extraction"
   },
   {
-   "default": "OpenRouter",
-   "fieldname": "provider",
-   "fieldtype": "Select",
-   "label": "Provider",
-   "options": "OpenRouter",
-   "reqd": 0,
-   "description": "Legacy provider. Use AI Task Models to select provider accounts."
-  },
-  {
-   "default": "google/gemini-2.5-flash",
-   "description": "Legacy OpenRouter model ID. Used when a task has no model rows.",
-   "fieldname": "model",
-   "fieldtype": "Data",
-   "label": "Model",
-   "reqd": 0
-  },
-  {
-   "fieldname": "openrouter_api_key",
-   "fieldtype": "Password",
-   "label": "OpenRouter API Key"
-  },
-  {
    "fieldname": "advanced_section",
    "fieldtype": "Section Break",
    "label": "Advanced"
-  },
-  {
-   "default": "8192",
-   "fieldname": "max_tokens",
-   "fieldtype": "Int",
-   "label": "Max Output Tokens"
   },
   {
    "default": "120",
    "fieldname": "request_timeout",
    "fieldtype": "Int",
    "label": "Request Timeout (seconds)"
-  },
-  {
-   "default": "0",
-   "description": "0 gives the most deterministic extraction.",
-   "fieldname": "temperature",
-   "fieldtype": "Float",
-   "label": "Temperature",
-   "precision": "2"
   },
   {
    "default": "3",
@@ -135,42 +94,42 @@
    "label": "AI Providers"
   },
   {
+   "description": "Row order sets priority for each task. Disabled rows, AI Models and accounts are skipped.",
    "fieldname": "task_models",
    "fieldtype": "Table",
    "label": "AI Task Models",
-   "options": "AI Task Model",
-   "description": "Row order sets priority for each task. Disabled rows and accounts are skipped."
+   "options": "AI Task Model"
   },
   {
    "collapsible": 1,
+   "description": "Prompts for the background AI jobs. The output schema and safety rules are added by code.",
    "fieldname": "ai_prompts_section",
    "fieldtype": "Section Break",
-   "label": "AI Prompts",
-   "description": "Prompts for the background AI jobs. The output schema and safety rules are added by code."
+   "label": "AI Prompts"
   },
   {
+   "description": "Instructions to read each scanned page into page data. Leave blank to use the built-in default.",
    "fieldname": "page_extraction_prompt",
    "fieldtype": "Long Text",
-   "label": "Page Extraction Prompt",
-   "description": "Instructions to read each scanned page into page data. Leave blank to use the built-in default."
+   "label": "Page Extraction Prompt"
   },
   {
+   "description": "Instructions to choose the scanner layout and the section of each page. Leave blank to use the built-in default.",
    "fieldname": "scan_decision_prompt",
    "fieldtype": "Long Text",
-   "label": "Scan Decision Prompt",
-   "description": "Instructions to choose the scanner layout and the section of each page. Leave blank to use the built-in default."
+   "label": "Scan Decision Prompt"
   },
   {
+   "description": "System prompt for the Scanned Document AI Verifier. Leave blank to use the built-in default.",
    "fieldname": "verifier_system_prompt",
    "fieldtype": "Long Text",
-   "label": "Verifier System Prompt",
-   "description": "System prompt for the Scanned Document AI Verifier. Leave blank to use the built-in default."
+   "label": "Verifier System Prompt"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-14 12:00:00.000000",
+ "modified": "2026-10-14 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Extraction Settings",

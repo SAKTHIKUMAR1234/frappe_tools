@@ -6,7 +6,14 @@ import time
 import frappe
 from requests import Response, Timeout
 
-from frappe_tools.ai.providers import ProviderError, error_message, token_usage
+from frappe_tools.ai.providers import (
+	ProviderError,
+	chat_parts,
+	chat_reply,
+	error_message,
+	split_system,
+	token_usage,
+)
 
 BASE_URL = "https://chatgpt.com/backend-api"
 
@@ -30,7 +37,7 @@ def build_turn(
 	"""Build one stateless turn: with store off, `messages` must hold the whole conversation."""
 	body = {
 		"model": model,
-		"instructions": system + ("\nReturn only JSON." if schema is None else ""),
+		"instructions": system + ("\nReturn only JSON." if schema is None and options.get("json_mode", True) else ""),
 		"input": list(messages),
 		"stream": True,
 		"store": False,
@@ -61,6 +68,7 @@ def parse_response(response: Response, deadline: float | None = None) -> tuple:
 				error_message(result) or event.get("message") or frappe._("Codex response failed or was incomplete"),
 				result=event, raw_text="".join(deltas) or _completed_text(result),
 				finish_reason="incomplete" if kind == "response.incomplete" else "failed",
+				usage=token_usage(result.get("usage") or {}),
 			)
 		if kind == "response.output_text.delta":
 			deltas.append(event.get("delta", ""))
@@ -114,3 +122,37 @@ def continuation(result: dict, outputs: list[tuple[dict, str]]) -> list[dict]:
 		for item in _function_calls(result)
 	]
 	return [*calls, *({"type": "function_call_output", "call_id": call["id"], "output": text} for call, text in outputs)]
+
+
+def chat_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+	"""Convert OpenAI chat `messages` to the system text and Responses input items."""
+	system, turns = split_system(messages)
+	return system, [item for message in turns for item in _chat_items(message)]
+
+
+def _chat_items(message):
+	if message["role"] == "tool":
+		return [{"type": "function_call_output", "call_id": message["tool_call_id"], "output": message["content"]}]
+	if message["role"] == "assistant":
+		text = message.get("content") or ""
+		items = [{"role": "assistant", "content": [{"type": "output_text", "text": text}]}] if text else []
+		items.extend(
+			{"type": "function_call", "call_id": call["id"], "name": call["function"]["name"],
+				"arguments": call["function"].get("arguments") or "{}"}
+			for call in message.get("tool_calls") or []
+		)
+		return items
+	return [{"role": "user", "content": [_input_part(part) for part in chat_parts(message["content"])]}]
+
+
+def _input_part(part):
+	if part["type"] == "text":
+		return {"type": "input_text", "text": part["text"]}
+	if part["type"] == "image_url":
+		image = part["image_url"]
+		return {"type": "input_image", "image_url": image["url"], **({"detail": image["detail"]} if image.get("detail") else {})}
+	raise ValueError(frappe._("OpenAI Codex cannot read {0} content").format(part["type"]))
+
+
+def assistant_message(result: dict, text: str) -> dict:
+	return chat_reply(text, tool_calls(result))

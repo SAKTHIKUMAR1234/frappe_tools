@@ -9,6 +9,7 @@ from PIL import Image
 
 from frappe_tools.ai import client
 from frappe_tools.ai.client import DeadlineReached, bounded_options
+from frappe_tools.ai.test_providers import ai_task_rows
 from frappe_tools.file_data import reader
 from frappe_tools.file_data.documents import files_for_document, get_document_pages
 from frappe_tools.file_data.extraction import PAGE_SCHEMA
@@ -118,7 +119,7 @@ class TestFileData(UnitTestCase):
 	def test_budget_ending_during_a_request_keeps_the_file_unread(self):
 		file = self.attach(image_content(), "png")
 		self.vision.side_effect = CALL_VISION
-		settings = frappe._dict(enable=1, model="local/test-model", max_attempts=1, get_api_key=lambda: "local-test-key")
+		settings = frappe._dict(enable=1, max_attempts=1, task_models=ai_task_rows("local/test-model"))
 		now = [1000.0]
 
 		def timed_out(*args, **kwargs):

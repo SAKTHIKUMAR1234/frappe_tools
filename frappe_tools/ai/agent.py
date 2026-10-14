@@ -39,14 +39,14 @@ def call_agent(
 	tools: list[Tool],
 	schema: dict,
 	deadline: float,
-	route: tuple[str, str] | None = None,
+	ai_model: str | None = None,
 	phase: str | None = None,
 	target_doctype: str | None = None,
 	reference_doctype: str | None = None,
 	reference_name: str | None = None,
 	run_id: str | None = None,
 ) -> dict:
-	"""Run a tool loop on the chosen route, then the task models, until a final answer matches `schema`.
+	"""Run a tool loop on the chosen `ai_model`, then the task models, until a final answer matches `schema`.
 
 	Every model turn is logged. `deadline` is a time.monotonic() value for the whole call.
 	"""
@@ -62,13 +62,13 @@ def call_agent(
 		reference_name=reference_name,
 		run_id=run_id,
 	)
-	last_error = frappe._("No enabled AI model and account for this task")
-	for account, model in client.routes(settings, task, route):
-		outcome = run.run_route(account, model, prompts, options, context)
+	last_error = None
+	for account, model in client.routes(settings, task, ai_model):
+		outcome = run.run_route(account, model.model_id, prompts, client.route_options(options, model), context)
 		if outcome["ok"]:
 			return outcome["result"]
 		last_error = outcome["error"]
-	return frappe.throw(frappe._("AI call failed: {0}").format(last_error))
+	return client.raise_call_failed(task, last_error)
 
 
 def get_known_secrets(settings) -> list[str]:

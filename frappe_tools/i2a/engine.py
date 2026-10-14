@@ -660,7 +660,7 @@ def _route(state, action, image_parts):
 	when there is a real choice. Every decision is logged."""
 	rows = [r for r in action.models if r.ai_model]
 	models = {r.ai_model: frappe.get_doc("AI Model", r.ai_model) for r in rows}
-	enabled = [r for r in rows if cint(models[r.ai_model].enabled)]
+	enabled = [r for r in rows if models[r.ai_model].is_usable]
 	if not enabled:
 		frappe.throw(_("I2A Action {0} has no enabled AI Models").format(action.name))
 

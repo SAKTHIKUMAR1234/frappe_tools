@@ -34,10 +34,10 @@ def call_model(
 	reference_name=None,
 	run_id=None,
 	min_output_tokens: int = 0,
-	route: tuple[str, str] | None = None,
+	ai_model: str | None = None,
 	deadline: float | None = None,
 ) -> dict:
-	"""Try the chosen (account, model) `route`, then task models in priority order, and log each attempt.
+	"""Try the chosen `ai_model`, then the task models in priority order, and log each attempt.
 
 	No request starts after `deadline` (time.monotonic()) and none runs past it.
 	"""
@@ -52,17 +52,31 @@ def call_model(
 		reference_name=reference_name,
 		run_id=run_id,
 	)
+	last_error = None
+	for account, model in routes(settings, task, ai_model):
+		model_options = route_options(options, model)
 
-	def build(adapter, credentials, model):
-		return adapter.build_request(credentials, model, *prompts, options)
+		def build(adapter, credentials, model_id):
+			return adapter.build_request(credentials, model_id, *prompts, model_options)
 
-	last_error = frappe._("No enabled AI model and account for this task")
-	for account, model in routes(settings, task, route):
-		outcome = try_model(account, model, build, options, context, deadline)
+		outcome = try_model(account, model.model_id, build, model_options, context, deadline)
 		if outcome.get("ok"):
 			return outcome["result"]
 		last_error = outcome["error"]
-	return frappe.throw(frappe._("AI call failed: {0}").format(last_error))
+	return raise_call_failed(task, last_error)
+
+
+def raise_call_failed(task: str, last_error: str | None):
+	"""Throw the last route error, or ask for an AI Task Models row when the task had no usable route."""
+	if last_error is None:
+		frappe.throw(
+			frappe._(
+				"No enabled AI Model for the task {0}. Add an AI Model row for this task in "
+				"Document Extraction Settings > AI Task Models."
+			).format(task),
+			title=frappe._("No AI Model"),
+		)
+	frappe.throw(frappe._("AI call failed: {0}").format(last_error))
 
 
 def task_settings(task: str):
@@ -73,43 +87,38 @@ def task_settings(task: str):
 
 def task_options(settings, min_output_tokens: int = 0) -> dict:
 	return {
-		"temperature": flt(settings.temperature),
-		"max_tokens": max(cint(settings.max_tokens) or 8192, min_output_tokens),
+		"min_tokens": min_output_tokens,
 		"timeout": cint(settings.request_timeout) or 120,
 		"attempts": max(cint(settings.max_attempts), 1),
 	}
 
 
-def routes(settings, task: str, route: tuple[str, str] | None = None):
-	"""Yield (account, model): the chosen (account, model) route first, then the task rows."""
-	rows = [row for row in (settings.get("task_models") or []) if row.task == task]
-	if route and all(route):
-		account = frappe.get_doc("AI Provider Account", route[0])
-		if account.enabled:
-			yield account, route[1]
-		if not rows:
-			return
-	yield from _task_routes(settings, rows)
+def route_options(options: dict, model) -> dict:
+	"""Add the AI Model's temperature and output tokens; the task's token floor still holds."""
+	return {
+		**options,
+		"temperature": flt(model.temperature),
+		"max_tokens": max(cint(model.max_tokens) or 8192, options["min_tokens"]),
+	}
 
 
-def _task_routes(settings, rows):
-	if not rows:
-		yield _legacy_route(settings)
+def routes(settings, task: str, ai_model: str | None = None):
+	"""Yield (account, AI Model): the chosen AI Model first, then the enabled task rows."""
+	if ai_model:
+		yield from _usable_route(ai_model)
+	for row in settings.get("task_models") or []:
+		if row.task == task and row.enabled:
+			yield from _usable_route(row.ai_model)
+
+
+def _usable_route(ai_model):
+	"""Yield the route of an enabled AI Model whose account is enabled; yield nothing otherwise."""
+	model = frappe.get_doc("AI Model", ai_model)
+	if not model.enabled:
 		return
-	for row in rows:
-		if row.enabled:
-			account = frappe.get_doc("AI Provider Account", row.account)
-			if account.enabled:
-				yield account, row.model
-
-
-def _legacy_route(settings):
-	key = settings.get_api_key()
-	if not key:
-		frappe.throw(frappe._("OpenRouter API Key is not set in Document Extraction Settings."))
-	if not settings.model:
-		frappe.throw(frappe._("Set the legacy model in Document Extraction Settings."))
-	return {"provider": "OpenRouter", "api_key": key, "auth_type": "API Key"}, settings.model
+	account = frappe.get_doc("AI Provider Account", model.account)
+	if account.enabled:
+		yield account, model
 
 
 def bounded_options(options: dict, deadline: float | None) -> dict:
@@ -137,24 +146,31 @@ def try_model(account, model: str, build, options: dict, context: dict, deadline
 	return outcome
 
 
-def _attempt(account, model, build, options, context, deadline=None):
-	started = time.monotonic()
-	state = dict(
+def new_state() -> dict:
+	"""Return the record of one request attempt that `execute` and `record_failure` fill."""
+	return dict(
 		body={},
 		result={},
 		usage={},
 		raw_text="",
+		data=None,
 		finish_reason=None,
 		http_status=None,
 		status="Error",
 		error=frappe._("AI attempt did not complete"),
+		retryable=False,
 		secrets=[],
 		calls=[],
 	)
+
+
+def _attempt(account, model, build, options, context, deadline=None):
+	started = time.monotonic()
+	state = new_state()
 	provider = account.get("provider")
 	qualified_model = f"{provider}/{model}"
 	try:
-		_execute(account, model, build, options, state, deadline)
+		execute(account, model, build, options, state, deadline)
 		state.update(status="Success", error=None)
 	except JobTimeoutException:
 		state.update(status="Timeout", error=frappe._("AI job timed out"))
@@ -163,7 +179,7 @@ def _attempt(account, model, build, options, context, deadline=None):
 		state.update(status="Timeout", error=str(exc))
 		raise
 	except Exception as exc:
-		_failure(state, exc)
+		record_failure(state, exc)
 	finally:
 		latency = int((time.monotonic() - started) * 1000)
 		_log_attempt(state, qualified_model, provider, latency, context)
@@ -183,8 +199,12 @@ def _attempt(account, model, build, options, context, deadline=None):
 	return {"ok": False, "error": state["error"], "retryable": state["retryable"]}
 
 
-def _execute(account, model, build, options, state, deadline):
-	"""Each step gets only the time left before `deadline`; the answer is read in parts and stops at it."""
+def execute(account, model: str, build, options: dict, state: dict, deadline: float | None = None) -> None:
+	"""Send one request and fill `state`; raise on failure.
+
+	Each step gets only the time left before `deadline`; the answer is read in parts and stops at it.
+	A reply that is not JSON fails unless `options["require_json"]` is false.
+	"""
 	credentials = accounts.credentials(account, bounded_options(options, deadline)["timeout"])
 	state["secrets"] = [credentials.get(field) for field in ("api_key", "access_token", "refresh_token")]
 	adapter = PROVIDERS[account.get("provider")]
@@ -212,7 +232,7 @@ def _execute(account, model, build, options, state, deadline):
 			raise requests.Timeout(frappe._("The AI answer arrived after the time budget ended"))
 		state["calls"] = adapter.tool_calls(state["result"]) if state["body"].get("tools") else []
 		state["data"] = llm.safe_json_loads(state["raw_text"])
-		if state["data"] is None and not state["calls"]:
+		if state["data"] is None and not state["calls"] and options.get("require_json", True):
 			raise ValueError(_json_error(state))
 	finally:
 		response.close()
@@ -228,12 +248,14 @@ def read_body(response: requests.Response, deadline: float | None) -> bytes:
 	return b"".join(chunks)
 
 
-def _failure(state, exc):
+def record_failure(state: dict, exc: Exception) -> None:
+	"""Record the status, redacted error and retry decision of a failed attempt in `state`."""
 	if isinstance(exc, ProviderError):
 		if exc.result is not None:
 			state["result"] = exc.result
 		state["raw_text"] = exc.raw_text
 		state["finish_reason"] = exc.finish_reason
+		state["usage"] = exc.usage or state["usage"]
 	code = getattr(exc, "status_code", None) or state["http_status"]
 	state["http_status"] = code
 	state["status"] = "Timeout" if isinstance(exc, requests.Timeout) else "Error"
@@ -255,7 +277,7 @@ def _is_retryable(exc, code, finish_reason):
 def _json_error(state):
 	hint = ""
 	if state["finish_reason"] in ("length", "max_tokens", "incomplete"):
-		hint = frappe._(" — response was truncated; raise 'Max Tokens' in Document Extraction Settings")
+		hint = frappe._(" — response was truncated; raise 'Max Tokens' on the AI Model")
 	snippet = llm.redact_secrets(state["raw_text"], state["secrets"])[:200] or frappe._("<empty response>")
 	return frappe._("could not parse JSON from model response{0}. Raw begins: {1}").format(hint, snippet)
 

@@ -1,4 +1,8 @@
 frappe.ui.form.on("Document Extraction Settings", {
+	setup(frm) {
+		frm.set_query("ai_model", "task_models", () => ({ filters: { enabled: 1 } }));
+	},
+
 	refresh(frm) {
 		if (!frappe.user.has_role("System Manager")) return;
 		frm.add_custom_button(__("Load default prompts"), () => load_default_prompts(frm));
