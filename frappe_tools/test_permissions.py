@@ -99,3 +99,25 @@ class TestAiBotPermission(FrappeTestCase):
 			self.assertEqual(permissions.ai_bot_query_conditions(user="bot@x.com"), "")
 		with patch.object(permissions.frappe, "get_roles", return_value=[]):
 			self.assertIsNone(permissions.ai_bot_query_conditions(user="u@x.com"))
+
+
+class TestAppPermission(FrappeTestCase):
+	"""The apps screen shows Frappe Tools to its managers and scanner users only."""
+
+	def test_allowed_roles_see_app(self):
+		import frappe_tools
+
+		for role in frappe_tools.APP_ROLES:
+			with patch.object(frappe_tools.frappe, "get_roles", return_value=[role]):
+				frappe.set_user("Guest")
+				self.assertTrue(frappe_tools.check_app_permission())
+
+	def test_other_roles_do_not_see_app(self):
+		import frappe_tools
+
+		with patch.object(frappe_tools.frappe, "get_roles", return_value=["Sales User"]):
+			frappe.set_user("Guest")
+			self.assertFalse(frappe_tools.check_app_permission())
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
