@@ -1,0 +1,46 @@
+{
+ "doctype": "DocType",
+ "name": "AI Task Model",
+ "module": "Frappe Tools",
+ "engine": "InnoDB",
+ "field_order": [
+  "task",
+  "account",
+  "model",
+  "enabled"
+ ],
+ "fields": [
+  {
+   "fieldname": "task",
+   "fieldtype": "Select",
+   "label": "Task",
+   "options": "Document Extraction\nPage Classification\nPage Extraction\nScan Decision\nVerifier",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "label": "Account",
+   "options": "AI Provider Account",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "label": "Model",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  }
+ ],
+ "permissions": [],
+ "istable": 1
+}

@@ -8,6 +8,12 @@
   "provider",
   "model",
   "openrouter_api_key",
+  "ai_providers_section",
+  "task_models",
+  "ai_prompts_section",
+  "page_extraction_prompt",
+  "scan_decision_prompt",
+  "verifier_system_prompt",
   "advanced_section",
   "max_tokens",
   "request_timeout",
@@ -33,15 +39,16 @@
    "fieldtype": "Select",
    "label": "Provider",
    "options": "OpenRouter",
-   "reqd": 1
+   "reqd": 0,
+   "description": "Legacy provider. Use AI Task Models to select provider accounts."
   },
   {
    "default": "google/gemini-2.5-flash",
-   "description": "OpenRouter model id. Use a Gemini vision model for best bounding-box accuracy (e.g. google/gemini-2.5-flash, google/gemini-2.5-pro).",
+   "description": "Legacy OpenRouter model ID. Used when a task has no model rows.",
    "fieldname": "model",
    "fieldtype": "Data",
    "label": "Model",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "openrouter_api_key",
@@ -121,12 +128,49 @@
    "fieldname": "embedding_api_key",
    "fieldtype": "Password",
    "label": "Embedding API Key (Google)"
+  },
+  {
+   "fieldname": "ai_providers_section",
+   "fieldtype": "Section Break",
+   "label": "AI Providers"
+  },
+  {
+   "fieldname": "task_models",
+   "fieldtype": "Table",
+   "label": "AI Task Models",
+   "options": "AI Task Model",
+   "description": "Row order sets priority for each task. Disabled rows and accounts are skipped."
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "ai_prompts_section",
+   "fieldtype": "Section Break",
+   "label": "AI Prompts",
+   "description": "Prompts for the background AI jobs. The output schema and safety rules are added by code."
+  },
+  {
+   "fieldname": "page_extraction_prompt",
+   "fieldtype": "Long Text",
+   "label": "Page Extraction Prompt",
+   "description": "Instructions to read each scanned page into page data. Leave blank to use the built-in default."
+  },
+  {
+   "fieldname": "scan_decision_prompt",
+   "fieldtype": "Long Text",
+   "label": "Scan Decision Prompt",
+   "description": "Instructions to choose the scanner layout and the section of each page. Leave blank to use the built-in default."
+  },
+  {
+   "fieldname": "verifier_system_prompt",
+   "fieldtype": "Long Text",
+   "label": "Verifier System Prompt",
+   "description": "System prompt for the Scanned Document AI Verifier. Leave blank to use the built-in default."
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-25 10:00:00.000000",
+ "modified": "2026-10-14 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Extraction Settings",

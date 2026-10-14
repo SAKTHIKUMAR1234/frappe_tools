@@ -1,0 +1,103 @@
+{
+ "doctype": "DocType",
+ "name": "AI Provider Account",
+ "module": "Frappe Tools",
+ "engine": "InnoDB",
+ "field_order": [
+  "account_name",
+  "provider",
+  "auth_type",
+  "enabled",
+  "api_key",
+  "access_token",
+  "refresh_token",
+  "token_expires",
+  "chatgpt_account_id",
+  "base_url",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "account_name",
+   "fieldtype": "Data",
+   "label": "Account Name",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "label": "Provider",
+   "options": "OpenRouter\nOpenAI Codex\nAnthropic",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "auth_type",
+   "fieldtype": "Select",
+   "label": "Auth Type",
+   "options": "API Key\nChatGPT Login\nSetup Token",
+   "reqd": 1
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Key / Setup Token",
+   "depends_on": "eval:doc.auth_type!='ChatGPT Login'"
+  },
+  {
+   "fieldname": "access_token",
+   "fieldtype": "Password",
+   "label": "Access Token",
+   "hidden": 1
+  },
+  {
+   "fieldname": "refresh_token",
+   "fieldtype": "Password",
+   "label": "Refresh Token",
+   "hidden": 1
+  },
+  {
+   "fieldname": "token_expires",
+   "fieldtype": "Datetime",
+   "label": "Token Expires",
+   "read_only": 1
+  },
+  {
+   "fieldname": "chatgpt_account_id",
+   "fieldtype": "Data",
+   "label": "ChatGPT Account ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "base_url",
+   "fieldtype": "Data",
+   "label": "Base URL",
+   "description": "Optional provider base URL override."
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "autoname": "field:account_name"
+}

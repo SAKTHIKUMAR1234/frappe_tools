@@ -5,3 +5,5 @@
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 frappe_tools.patches.set_scan_ai_setting_defaults
+frappe_tools.patches.create_openrouter_account
+frappe_tools.patches.move_scan_page_data_to_file

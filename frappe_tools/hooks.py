@@ -83,7 +83,10 @@ app_license = "mit"
 # ------------
 
 # before_install = "frappe_tools.install.before_install"
-after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
+after_install = [
+	"frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions",
+	"frappe_tools.file_data.fields.create_file_fields",
+]
 
 # Uninstallation
 # ------------
@@ -118,11 +121,13 @@ after_install = "frappe_tools.setup.ai_bot_permissions.setup_ai_bot_permissions"
 # Permissions evaluated in scripted ways
 
 permission_query_conditions = {
+	"AI Provider Account": "frappe_tools.frappe_tools.doctype.ai_provider_account.ai_provider_account.permission_query_conditions",
 	"Document AI Call Log": "frappe_tools.frappe_tools.doctype.document_ai_call_log.document_ai_call_log.permission_query_conditions",
 	"*": "frappe_tools.permissions.ai_bot_query_conditions",
 }
 
 has_permission = {
+	"AI Provider Account": "frappe_tools.frappe_tools.doctype.ai_provider_account.ai_provider_account.has_permission",
 	"Document AI Call Log": "frappe_tools.frappe_tools.doctype.document_ai_call_log.document_ai_call_log.has_permission",
 	"*": "frappe_tools.permissions.ai_bot_has_permission",
 }
