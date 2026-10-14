@@ -5,7 +5,7 @@ This guide covers the PDF preview, the page data on files, the nightly AI catego
 ## Requirements
 
 - An OpenRouter API key in Document Extraction Settings.
-- The Python packages `opencv-python-headless`, `numpy` and `pypdfium2`. They are in `pyproject.toml` and install with the app.
+- The Python packages `opencv-python-headless`, `numpy`, `pypdfium2` and `xlsxwriter`. They are in `pyproject.toml` and install with the app.
 - Document Scanner Layouts with sections for the target DocType. AI categorization needs them.
 
 ## Scanned document PDF preview

@@ -7,7 +7,7 @@ from io import BytesIO
 from unittest.mock import Mock, call, patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 from openpyxl import load_workbook
 
 from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
@@ -18,7 +18,7 @@ READ_CHECKPOINTS = verifier._result_rows
 MAKE_WORKBOOK = verifier.make_workbook
 
 
-class TestScannedDocumentAIVerifier(UnitTestCase):
+class TestScannedDocumentAIVerifier(FrappeTestCase):
 	def setUp(self):
 		self.enterContext(patch.object(verifier, "now_datetime", return_value=datetime(2026, 10, 13, 12)))
 		self.doc = frappe._dict(

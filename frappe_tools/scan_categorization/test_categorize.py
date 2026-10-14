@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import cv2
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 
 from frappe_tools.ai.test_providers import response as provider_response
 from frappe_tools.api.doc_classify import load_classification_pages
@@ -55,7 +55,7 @@ def page_keys(call) -> list[str]:
 	return list(call.kwargs["schema"]["properties"])
 
 
-class TestCategorize(UnitTestCase):
+class TestCategorize(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.addCleanup(frappe.db.rollback)
@@ -1240,7 +1240,7 @@ class TestCategorize(UnitTestCase):
 		log.assert_called_once()
 
 
-class TestDecisions(UnitTestCase):
+class TestDecisions(FrappeTestCase):
 	def setUp(self):
 		self.enterContext(patch.object(decisions, "MAX_INPUT_TOKENS", 26000))  # small budget keeps size tests fast
 		self.layouts = {"Bill": [{"title": "Invoice", "layout_type": "Single Page"}]}

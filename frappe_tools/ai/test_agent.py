@@ -3,7 +3,7 @@ import time
 from unittest.mock import Mock, patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 
 from frappe_tools.ai import agent, client
 from frappe_tools.ai.agent import Tool
@@ -50,7 +50,7 @@ def anthropic_turn(calls=None, content=None):
 	return response({"content": parts, "stop_reason": "tool_use" if calls else "end_turn", "usage": {}})
 
 
-class TestAgent(UnitTestCase):
+class TestAgent(FrappeTestCase):
 	def setUp(self):
 		self._outcome.result.tb_locals = False
 		frappe.set_user("Administrator")

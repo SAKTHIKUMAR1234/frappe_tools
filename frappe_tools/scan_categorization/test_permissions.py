@@ -5,7 +5,7 @@ from io import BytesIO
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 from openpyxl import load_workbook
 
 from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
@@ -14,7 +14,7 @@ from frappe_tools.frappe_tools.doctype.scanned_document_ai_verifier import (
 from frappe_tools.utils import llm
 
 
-class TestEvidencePermissions(UnitTestCase):
+class TestEvidencePermissions(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.addCleanup(frappe.db.rollback)

@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 
 from frappe_tools.file_data import extraction
 from frappe_tools.frappe_tools.doctype.document_extraction_settings import (
@@ -17,7 +17,7 @@ def blank_page() -> dict:
 	return page
 
 
-class TestAIPrompts(UnitTestCase):
+class TestAIPrompts(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.addCleanup(frappe.set_user, "Administrator")

@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 
 from frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_detail import (
 	DETAIL,
@@ -11,7 +11,7 @@ from frappe_tools.frappe_tools.doctype.scanned_document_detail.scanned_document_
 from frappe_tools.utils import save_file_always_new
 
 
-class TestOriginalRetention(UnitTestCase):
+class TestOriginalRetention(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.addCleanup(frappe.db.rollback)

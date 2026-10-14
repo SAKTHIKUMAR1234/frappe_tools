@@ -94,7 +94,9 @@ def _read_file(file_url):
 
 	if file_doc is not None:
 		mime = mimetypes.guess_type(file_doc.file_name or file_url)[0] or "image/jpeg"
-		return file_doc.get_content(encodings=[]), mime
+		content = file_doc.get_content()
+		# Frappe 15 decodes UTF-8 content to str; callers need the raw bytes.
+		return (content.encode() if isinstance(content, str) else content), mime
 
 	# Fallback: direct site path (files not tracked by a File doc)
 	path = frappe.get_site_path(file_url.lstrip("/"))

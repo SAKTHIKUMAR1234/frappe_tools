@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 
 from frappe_tools.scan_categorization.rotation import correct_image, detect_skew
 
@@ -21,7 +21,7 @@ def data_url(image: np.ndarray, extension=".png") -> str:
 	return f"data:{mime};base64," + base64.b64encode(cv2.imencode(extension, image)[1]).decode()
 
 
-class TestRotation(UnitTestCase):
+class TestRotation(FrappeTestCase):
 	def test_preserves_image_format(self):
 		for extension, signature in ((".jpg", b"\xff\xd8\xff"), (".png", b"\x89PNG\r\n\x1a\n")):
 			with self.subTest(extension=extension):

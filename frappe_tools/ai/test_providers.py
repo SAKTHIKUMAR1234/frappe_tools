@@ -1,7 +1,7 @@
 import json
 from unittest.mock import Mock
 
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 
 from frappe_tools.ai.providers import ProviderError, anthropic, codex, openrouter
 
@@ -22,7 +22,7 @@ def response(result: dict | None = None, status: int = 200, events: list | None 
 	return mock
 
 
-class TestProviders(UnitTestCase):
+class TestProviders(FrappeTestCase):
 	def setUp(self):
 		self.account = dict(
 			api_key="local-only-key",

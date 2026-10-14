@@ -12,6 +12,7 @@ dependencies = [
     "opencv-python-headless",
     "numpy",
     "pypdfium2",
+    "xlsxwriter",
     # "frappe~=15.0.0" # Installed and managed by bench.
 ]
 

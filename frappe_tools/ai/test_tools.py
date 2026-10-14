@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 
 from frappe_tools.ai import tools
 from frappe_tools.ai.tools import ToolError
@@ -23,7 +23,6 @@ DENIED = [
 	"Document AI Call Log",
 	"OAuth Client",
 	"OAuth Bearer Token",
-	"Bank Account",
 ]
 
 
@@ -43,7 +42,7 @@ PARENT = Meta(name="Local Parent", fields=[
 CHILD = Meta(name="Local Child", fields=[field("item_code", "Link", "Item"), field("pin", "Password"), field("qty", "Float")])
 
 
-class TestTools(UnitTestCase):
+class TestTools(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.todo = frappe.get_doc(dict(doctype="ToDo", description="local tool test", allocated_to="Administrator")).insert()

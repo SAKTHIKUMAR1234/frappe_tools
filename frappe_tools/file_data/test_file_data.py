@@ -4,7 +4,7 @@ from io import BytesIO
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 from PIL import Image
 
 from frappe_tools.ai import client
@@ -32,7 +32,7 @@ def pdf_content(pages: int) -> bytes:
 	return buffer.getvalue()
 
 
-class TestFileData(UnitTestCase):
+class TestFileData(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.addCleanup(frappe.db.rollback)
@@ -195,7 +195,7 @@ class TestFileData(UnitTestCase):
 		self.vision.assert_not_called()
 
 
-class TestPageTextLines(UnitTestCase):
+class TestPageTextLines(FrappeTestCase):
 	def test_text_given_as_lines_is_joined(self):
 		from frappe_tools.file_data.extraction import _validate_pages
 

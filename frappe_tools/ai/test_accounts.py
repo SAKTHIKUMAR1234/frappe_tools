@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import frappe
 import requests
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_to_date, now_datetime
 
 from frappe_tools.ai import accounts
@@ -29,7 +29,7 @@ def tokens(marker: str = "local", *, account_id: str = "local-account") -> dict:
 	)
 
 
-class TestAccounts(UnitTestCase):
+class TestAccounts(FrappeTestCase):
 	def setUp(self):
 		self._outcome.result.tb_locals = False
 		frappe.set_user("Administrator")

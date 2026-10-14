@@ -56,7 +56,7 @@ def _is_blocked(file):
 	"""Matches a File that `is_retry_due` rejects."""
 	return (IfNull(file.ai_page_error, "") != "") & (
 		(IfNull(file.ai_page_attempts, 0) >= MAX_AUTO_ATTEMPTS)
-		| (IfNull(file.ai_page_error_on, "1900-01-01") > retry_cutoff())
+		| (file.ai_page_error_on > retry_cutoff())
 	)
 
 

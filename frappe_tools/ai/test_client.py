@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import frappe
 import requests
-from frappe.tests import UnitTestCase
+from frappe.tests.utils import FrappeTestCase
 from rq.timeouts import JobTimeoutException
 
 from frappe_tools.ai import client
@@ -12,7 +12,7 @@ from frappe_tools.ai.test_providers import IMAGE, SCHEMA, response
 from frappe_tools.utils import llm
 
 
-class TestClient(UnitTestCase):
+class TestClient(FrappeTestCase):
 	def setUp(self):
 		self._outcome.result.tb_locals = False
 		frappe.set_user("Administrator")
