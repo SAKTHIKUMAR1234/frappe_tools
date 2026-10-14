@@ -83,7 +83,19 @@ def _validate_pages(pages, count):
 	return pages
 
 
+TEXT_FIELDS = ("full_text", "confidence_notes")
+
+
+def _join_text_lines(page):
+	"""Some models return text as a list of lines; store it as one text."""
+	for key in TEXT_FIELDS:
+		value = page[key]
+		if isinstance(value, list) and all(isinstance(line, str) for line in value):
+			page[key] = "\n".join(value)
+
+
 def _validate_data(page):
+	_join_text_lines(page)
 	types = {"document_type": str, "document_number": str, "document_date": str,
 		"parties": dict, "references": dict, "totals": dict, "other_fields": dict,
 		"taxes": (dict, list), "items": list, "item_table": dict, "handwritten": list,
