@@ -39,7 +39,7 @@ ITEM_FIELDS = ("item_code", "item_name", "description", "qty", "uom", "rate", "a
 def _layouts(doctype):
 	layouts = {}
 	for name in frappe.get_all(
-		"Document Scanner Layout", filters={"layout_doctype": doctype, "docstatus": ["<", 2]},
+		"Document Scanner Layout", filters={"layout_doctype": doctype, "docstatus": ["<", 2], "is_catch_all": 0},
 		pluck="name", order_by="name asc",
 	):
 		sections = _layout_sections(name)
@@ -256,8 +256,30 @@ def _record_pages(outcome, details, pages):
 	) for detail, page in zip(details, pages, strict=True)]
 
 
+PARTY_FIELDS = ("supplier", "customer", "party")
+
+
+def _layout_hints(scan, layouts):
+	"""Layout descriptions and how earlier scans of the same party were filed."""
+	notes = dict(frappe.get_all("Document Scanner Layout", filters={"name": ["in", list(layouts)],
+		"ai_description": ["is", "set"]}, fields=["name", "ai_description"], as_list=True))
+	meta = frappe.get_meta(scan._doctype)
+	field = next((name for name in PARTY_FIELDS if meta.has_field(name)), meta.title_field)
+	if field and not meta.has_field(field):
+		field = None
+	party = field and frappe.db.get_value(scan._doctype, scan._docname, field)
+	if not party:
+		return {"layout_notes": notes, "party_layout_history": {}}
+	history = frappe.db.sql(f"""select sd.scanner_layout, count(*) from `tabScanned Document` sd
+		join `tab{scan._doctype}` doc on doc.name = sd._docname
+		where sd._doctype = %s and doc.`{field}` = %s and sd.name != %s and sd.scanner_layout in %s
+		group by sd.scanner_layout order by count(*) desc limit 5""",
+		(scan._doctype, party, scan.name, tuple(layouts)))
+	return {"layout_notes": notes, "party_layout_history": dict(history)}
+
+
 def _decisions(scan, layouts, pages, outcome):
-	state = {"document": _document_state(scan), "pages": pages}
+	state = {"document": _document_state(scan), "pages": pages, **_layout_hints(scan, layouts)}
 	answer = decide_layout(state, layouts, scan._doctype, **_context(scan))
 	outcome.update(layout=answer["layout"], layout_confidence=answer["confidence"])
 	sections = {s["title"]: s["layout_type"] for s in layouts[answer["layout"]]}

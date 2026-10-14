@@ -787,6 +787,23 @@ class TestCategorize(UnitTestCase):
 		verifier._load_pages("Purchase Invoice", self.bill.name, [self.scan.name])
 		self.vision_mock.assert_called_once()
 
+	def test_catch_all_layout_is_never_an_option(self):
+		catch_all = frappe.get_doc({
+			"doctype": "Document Scanner Layout", "layout_name": self.prefix + "-all", "layout_doctype": "Purchase Invoice",
+			"is_catch_all": 1, "layout_doctype_sections": [{"title": self.titles[0], "layout_type": "Single Page"}],
+		}).insert()
+		layouts = flow._layouts("Purchase Invoice")
+		self.assertIn(self.layout.name, layouts)
+		self.assertNotIn(catch_all.name, layouts)
+
+	def test_layout_hints_give_notes_and_party_history(self):
+		frappe.db.set_value("Document Scanner Layout", self.layout.name, "ai_description", "Fabric bills")
+		frappe.db.set_value("Purchase Invoice", self.bill.name, "supplier", "Local Scanner Supplier")
+		self.new_scan()
+		hints = flow._layout_hints(self.scan, {self.layout.name: []})
+		self.assertEqual(hints["layout_notes"], {self.layout.name: "Fabric bills"})
+		self.assertEqual(hints["party_layout_history"], {self.layout.name: 1})
+
 	def test_missing_layout_fails_without_vision(self):
 		with patch.object(flow, "_layouts", side_effect=ValueError("No scanner layouts")), patch.object(frappe, "log_error"):
 			flow.categorize_scan(self.scan.name, self.scan.ai_run_id)

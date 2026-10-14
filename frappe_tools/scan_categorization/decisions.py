@@ -30,7 +30,11 @@ CONFIDENCE = {"type": "number", "description": "Confidence from 0 to 1."}
 def decide_layout(state: dict, layouts: dict, doctype: str, **context) -> dict:
 	"""Return {"layout", "confidence", "reason"} for the best layout of the scan."""
 	lines = "\n".join(f"- {_layout_description(name, doctype, sections)}" for name, sections in layouts.items())
-	instructions = f"Choose the best scanner layout for this {doctype} scan.\nLayouts:\n{lines}"
+	instructions = (
+		f"Choose the best scanner layout for this {doctype} scan.\nLayouts:\n{lines}\n"
+		"layout_notes describes what belongs in a layout. party_layout_history counts how earlier "
+		"scans of the same party were filed; prefer it when the bill is of the same kind."
+	)
 	schema = _object({"layout": {"type": "string", "enum": list(layouts)}, "confidence": CONFIDENCE,
 		"reason": {"type": "string"}})
 	answer = _ask(state, instructions, schema, doctype, phase="Layout Decision", **context)
