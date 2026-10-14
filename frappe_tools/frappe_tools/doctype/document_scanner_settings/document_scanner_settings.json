@@ -12,7 +12,6 @@
   "ai_confidence_threshold",
   "ai_batch_limit",
   "ai_process_since",
-  "ai_max_pages",
   "enable_page_extraction",
   "page_extraction_batch_limit"
  ],
@@ -60,12 +59,6 @@
    "description": "Only scans created on or after this date. Blank includes all unchecked scans."
   },
   {
-   "fieldname": "ai_max_pages",
-   "fieldtype": "Int",
-   "label": "AI Max Pages",
-   "default": "30"
-  },
-  {
    "fieldname": "enable_page_extraction",
    "fieldtype": "Check",
    "label": "Enable Page Extraction",
@@ -84,7 +77,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-13 12:00:00.000000",
+ "modified": "2026-10-14 12:50:04.687636",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "Document Scanner Settings",

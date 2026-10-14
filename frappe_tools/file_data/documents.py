@@ -2,35 +2,29 @@
 
 import frappe
 
-from frappe_tools.file_data.reader import FILE, FILE_FIELDS, file_kind, page_count, page_total, read_file
+from frappe_tools.file_data.reader import FILE, FILE_FIELDS, file_kind, read_file
 
 SCAN = "Scanned Document"
 DETAIL = "Scanned Document Detail"
 
 
-def get_document_pages(doctype: str, name: str, limit: int | None = None) -> tuple[list[dict], int]:
-	"""Return the ordered pages of a document up to `limit` and the count of omitted pages.
+def get_document_pages(doctype: str, name: str) -> list[dict]:
+	"""Return all ordered pages of a document.
 
 	A Scanned Document uses the files of its active pages; any other document uses its attached
 	images and PDFs. Unread files are read now. Needs read permission on the document.
 	"""
 	context = _read_context(doctype, name)
-	pages, omitted, errors = [], 0, []
+	pages, errors = [], []
 	for file, extra in _document_files(doctype, name):
-		room = None if limit is None else max(limit - len(pages), 0)
-		if room == 0:
-			omitted += page_count(file)
-			continue
 		data = read_file(file.name, retry_failed=True, context=context)
 		if data is None:
 			errors.append(f"{file.file_name or file.name}: {_error(file.name)}")
 			continue
-		taken = data["pages"][:room]
-		pages.extend({**page, **extra} for page in taken)
-		omitted += page_total(data) - len(taken)
+		pages.extend({**page, **extra} for page in data["pages"])
 	if errors:
 		raise ValueError("Some files could not be read. " + "; ".join(errors))
-	return [{**page, "page_no": number} for number, page in enumerate(pages, 1)], omitted
+	return [{**page, "page_no": number} for number, page in enumerate(pages, 1)]
 
 
 def files_for_document(doctype: str, name: str) -> list[str]:

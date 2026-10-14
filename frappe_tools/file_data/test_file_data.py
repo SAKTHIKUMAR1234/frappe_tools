@@ -53,13 +53,13 @@ class TestFileData(UnitTestCase):
 
 	def test_image_file_is_read_once_and_stored_on_the_file(self):
 		file = self.attach(image_content(), "png")
-		pages, omitted = get_document_pages("ToDo", self.todo.name)
-		self.assertEqual((len(pages), omitted, pages[0]["page_no"]), (1, 0, 1))
+		pages = get_document_pages("ToDo", self.todo.name)
+		self.assertEqual((len(pages), pages[0]["page_no"]), (1, 1))
 		stored = self.stored(file)
 		self.assertEqual(frappe.parse_json(stored.ai_page_data)["pages"][0]["document_number"], f"{self.prefix}-1")
 		self.assertEqual((stored.ai_page_count, stored.ai_page_model), (1, "local/test-model"))
 		self.assertEqual(self.vision.call_args.kwargs["reference_name"], self.todo.name)
-		self.assertEqual(get_document_pages("ToDo", self.todo.name)[0], pages)
+		self.assertEqual(get_document_pages("ToDo", self.todo.name), pages)
 		self.vision.assert_called_once()
 
 	def test_pdf_pages_are_rendered_and_read_one_by_one(self):
@@ -68,14 +68,6 @@ class TestFileData(UnitTestCase):
 		self.assertEqual(self.vision.call_count, 2)
 		self.assertTrue(all(call.args[0][0].startswith("data:image/jpeg") for call in self.vision.call_args_list))
 		self.assertEqual(self.stored(file).ai_page_count, 2)
-
-	def test_pdf_over_the_page_cap_notes_the_rest(self):
-		file = self.attach(pdf_content(3), "pdf")
-		with patch.object(reader, "MAX_FILE_PAGES", 2):
-			data = reader.read_file(file.name)
-		self.assertEqual((len(data["pages"]), data["omitted_pages"]), (2, 1))
-		self.assertEqual(self.stored(file).ai_page_count, 3)
-		self.assertEqual(get_document_pages("ToDo", self.todo.name, limit=1)[1], 2)
 
 	def test_same_content_is_copied_without_a_model_call(self):
 		content = image_content()
@@ -94,9 +86,9 @@ class TestFileData(UnitTestCase):
 		early = self.attach(image_content("JPEG"), "jpg", field="attachment")
 		frappe.db.set_value("File", early.name, "creation", "2000-01-01")
 		self.assertEqual(files_for_document("ToDo", self.todo.name), [late.name, early.name, pdf.name])
-		pages, omitted = get_document_pages("ToDo", self.todo.name, limit=2)
-		self.assertEqual(([page["page_no"] for page in pages], omitted), ([1, 2], 1))
-		self.assertEqual(self.vision.call_count, 2)
+		pages = get_document_pages("ToDo", self.todo.name)
+		self.assertEqual([page["page_no"] for page in pages], [1, 2, 3])
+		self.assertEqual(self.vision.call_count, 3)
 
 	def test_document_pages_need_read_permission(self):
 		self.attach(image_content(), "png")
@@ -119,7 +111,7 @@ class TestFileData(UnitTestCase):
 		self.vision.assert_called_once()
 
 	def test_patch_moves_detail_page_data_to_its_file_once(self):
-		if not frappe.db.has_column(DETAIL, "ai_page_data"):
+		if not all(frappe.db.has_column(DETAIL, column) for column in ("ai_page_data", "ai_page_data_attachment")):
 			self.skipTest("Old detail columns are not on this site")
 		detail = frappe.get_doc({"doctype": DETAIL, "page_no": 1}).insert(ignore_mandatory=True)
 		file = self.attach(image_content(), "png", field="attachment", doctype=DETAIL, name=detail.name)

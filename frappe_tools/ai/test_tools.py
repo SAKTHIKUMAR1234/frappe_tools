@@ -161,10 +161,10 @@ class TestTools(UnitTestCase):
 		self.assertNotIn("Section Break", {row["fieldtype"] for row in fields.values()})
 		self.assertEqual({row["fieldname"]: row for row in tools.get_doctype_fields("ToDo")}["allocated_to"]["options"], "User")
 
-	def test_pages_use_file_data_with_page_limit(self):
-		with patch.object(tools, "get_document_pages", return_value=([{"page_no": 1}], 3)) as pages:
-			self.assertEqual(tools.get_pages("ToDo", self.todo.name), {"pages": [{"page_no": 1}], "omitted_pages": 3})
-		pages.assert_called_once_with("ToDo", self.todo.name, limit=tools.MAX_PAGES)
+	def test_pages_use_file_data(self):
+		with patch.object(tools, "get_document_pages", return_value=[{"page_no": 1}]) as pages:
+			self.assertEqual(tools.get_pages("ToDo", self.todo.name), {"pages": [{"page_no": 1}]})
+		pages.assert_called_once_with("ToDo", self.todo.name)
 
 	def test_read_tools_are_the_only_tools(self):
 		self.assertEqual([tool.name for tool in tools.READ_TOOLS],

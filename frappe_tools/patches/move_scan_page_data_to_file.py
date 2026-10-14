@@ -12,7 +12,7 @@ DETAIL = "Scanned Document Detail"
 
 def execute() -> None:
 	create_file_fields()
-	if not frappe.db.has_column(DETAIL, "ai_page_data"):
+	if not all(frappe.db.has_column(DETAIL, column) for column in ("ai_page_data", "ai_page_data_attachment")):
 		return
 	for detail in _read_details():
 		file = _detail_file(detail)

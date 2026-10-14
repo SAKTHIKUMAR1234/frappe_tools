@@ -9,7 +9,6 @@ from frappe_tools.ai.agent import Tool
 from frappe_tools.file_data.documents import get_document_pages
 
 MAX_LIST_ROWS = 50
-MAX_PAGES = 20
 COLUMNS = frozenset(default_fields) - {"doctype"}
 DENIED_DOCTYPES = frozenset(
 	{
@@ -146,8 +145,7 @@ def get_pages(doctype: str, name: str) -> dict:
 	get_readable_meta(doctype)
 	if not isinstance(name, str):
 		raise ToolError("name must be text")
-	pages, omitted = get_document_pages(doctype, name, limit=MAX_PAGES)
-	return {"pages": pages, "omitted_pages": omitted}
+	return {"pages": get_document_pages(doctype, name)}
 
 
 def _check_fieldnames(meta, fields):
@@ -259,7 +257,7 @@ READ_TOOLS = [
 	),
 	Tool(
 		"get_document_pages",
-		"Read the stored page data of a document's scans or attached files (at most 20 pages).",
+		"Read the stored page data of a document's scans or attached files.",
 		_object({"doctype": TEXT, "name": TEXT}, ["doctype", "name"]),
 		get_pages,
 	),
