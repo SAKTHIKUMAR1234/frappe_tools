@@ -516,6 +516,7 @@ def _make_utils_module():
 	mod.getdate = getdate
 	mod.add_days = add_days
 	mod.add_to_date = add_to_date
+	mod.get_datetime = add_to_date
 	mod.get_url = get_url
 	mod.cstr = lambda v: "" if v is None else str(v)
 	return mod
@@ -562,6 +563,7 @@ class FakeRequests(types.ModuleType):
 		exc.RequestException = FakeRequests.RequestException
 		exc.HTTPError = FakeRequests.HTTPError
 		self.exceptions = exc
+		self.Response = FakeRequests._Resp
 
 	def post(self, url, headers=None, json=None, data=None, timeout=None, **kwargs):
 		self.calls.append({"url": url, "headers": headers, "body": json, "timeout": timeout})
@@ -589,6 +591,12 @@ def install():
 
 	sys.modules["frappe"] = frappe
 	sys.modules["frappe.utils"] = frappe.utils
+	for name, attrs in {
+		"frappe.database": {"get_db": lambda **kwargs: frappe.db},
+		"frappe.model": {},
+		"frappe.model.document": {"Document": FakeRow},
+	}.items():
+		sys.modules[name] = types.SimpleNamespace(**attrs)
 	sys.modules["requests"] = requests
 	sys.modules["requests.exceptions"] = requests.exceptions
 

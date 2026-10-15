@@ -3,7 +3,7 @@
 import frappe
 from requests import Response
 
-from frappe_tools.ai.providers import ProviderError, error_message
+from frappe_tools.ai.providers import ProviderError, error_message, split_system
 
 BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -30,9 +30,10 @@ def build_turn(
 		"messages": [{"role": "system", "content": system}, *messages],
 		"temperature": options["temperature"],
 		"max_tokens": options["max_tokens"],
-		"response_format": {"type": "json_object"},
 		"usage": {"include": True},
 	}
+	if options.get("json_mode", True):
+		body["response_format"] = {"type": "json_object"}
 	if schema is not None:
 		body["response_format"] = {
 			"type": "json_schema",
@@ -64,6 +65,16 @@ def parse_response(response: Response) -> tuple:
 		choice.get("finish_reason"),
 		result,
 	)
+
+
+def chat_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+	"""Return the system text and the turns of OpenAI chat `messages`; this API reads them as they are."""
+	return split_system(messages)
+
+
+def assistant_message(result: dict, text: str) -> dict:
+	"""Return the reply as sent, so provider fields such as reasoning go back with it."""
+	return {**_message(result), "role": "assistant"}
 
 
 def _message(result):

@@ -4,7 +4,7 @@ This guide covers the PDF preview, the page data on files, the nightly AI catego
 
 ## Requirements
 
-- An OpenRouter API key in Document Extraction Settings.
+- An AI Provider Account, an AI Model and an AI Task Models row for each AI task. See [AI providers](#ai-providers).
 - The Python packages `opencv-python-headless`, `numpy`, `pypdfium2` and `xlsxwriter`. They are in `pyproject.toml` and install with the app.
 - Document Scanner Layouts with sections for the target DocType. AI categorization needs them.
 
@@ -22,7 +22,7 @@ A vision model reads each file once and stores the page data as JSON on the File
 - When another File with the same content already has data, the app copies that data and makes no vision call.
 - A new or replaced attachment is a different File, so the app reads it again.
 - When a file cannot be read, or the response is cut off, the error is saved in AI Page Error and no page data is saved. The hourly job tries a failed file again 6 hours after the last failure, up to 3 failed attempts in total. A successful read resets the count. Read pages now and the verifier try again at once, also after 3 attempts.
-- The response can use up to 16,000 output tokens, or more when Max Tokens in Document Extraction Settings is higher.
+- The response can use up to 16,000 output tokens, or more when Max Tokens on the AI Model is higher.
 - AI Page Model shows the model that read the file.
 
 ### Which files belong to a document
@@ -61,7 +61,7 @@ The scheduler runs the job every day at 03:00. The job queues the scans that are
 
 ### How to switch it on
 
-1. Set up an AI provider and a model for the Scan Decision task (see AI providers).
+1. Set up an AI Model for the Scan Decision task (see AI providers).
 2. Open Document Scanner Settings, go to the AI Categorization section and check Enable AI Categorization.
 
 | Setting | Default | Meaning |
@@ -102,7 +102,7 @@ Use the verifier to compare the scans or the attached files of many documents wi
 3. Set the filters to choose the documents.
 4. Write the prompt. Say what to check and what columns you want.
 5. Set Max Documents (default 200). The run takes the oldest documents first.
-6. Optional: set AI Account and Model to choose the model for this verifier. Set both or leave both blank.
+6. Optional: set AI Model to choose the model for this verifier.
 7. Save, then click Run.
 
 The form shows live progress (documents done, total and failed). The progress comes through realtime updates. When the run is Completed, click Download Excel.
@@ -119,7 +119,7 @@ Put any mismatch in the remarks.
 
 ### Model choice
 
-When AI Account and Model are set, the run uses that account and model first. The Verifier rows in AI Task Models are the fallbacks. When both are blank, the run uses the Verifier rows. The app selects no model for you. The system prompt is the Verifier System Prompt in Document Extraction Settings. The app adds the output rules to it.
+When AI Model is set, the run uses that AI Model first. The Verifier rows in AI Task Models are the fallbacks. When AI Model is blank, the run uses the Verifier rows. The app selects no model for you. The system prompt is the Verifier System Prompt in Document Extraction Settings. The app adds the output rules to it.
 
 ### Read-only tools
 
@@ -197,15 +197,26 @@ Who can see the logs:
 
 ## AI providers
 
-Enable Document Extraction in Document Extraction Settings. A System Manager can create AI Provider Accounts for OpenRouter, OpenAI Codex or Anthropic. Set the model names in AI Task Models. No model is selected for you.
+Enable Document Extraction in Document Extraction Settings. Every model is set up as an AI Model. AI Task Models, the verifier and I2A Actions all select AI Models. No model is selected for you.
+
+To set up a model:
+
+1. Create an AI Provider Account for OpenRouter, OpenAI Codex or Anthropic. A System Manager can do this. The account holds the login or the API key, and the optional Base URL.
+2. Create an AI Model. Select the Account. The Provider comes from the account. Enter the Model ID, for example google/gemini-2.5-flash or gpt-5.6-luna.
+3. Set Max Tokens and Temperature on the AI Model. Set Supports Vision when the model can read images. Supports JSON Mode controls the JSON response format for I2A.
+4. Select the AI Model in AI Task Models, on a verifier or in an I2A Action.
+
+The AI Model holds no key. Many AI Models can use one account. The call log shows the model as Provider/Model ID.
 
 For OpenRouter, select API Key and enter the key. For OpenAI Codex, select ChatGPT Login and save the account. Click Connect ChatGPT account, open the shown URL and enter the code. The form updates when login is complete. You can also click Paste Codex auth.json and paste the contents of your local file. After a paste, the app and the Codex CLI share one login, and the first one that refreshes it logs the other out. Use Connect ChatGPT account when you can. The app stores the tokens with encryption and refreshes them before expiry.
 
 For Anthropic, select API Key or Setup Token. Put the key or the setup token in API Key / Setup Token. A setup token starts with sk-ant-oat. Schema requests use native JSON output through output_config.format. This uses the same Messages API for both authentication types and needs no JSON output beta. It also avoids the forced tool restriction on some models. Select a model that supports structured output.
 
-Add a row for each task, account and model in AI Task Models. Row order sets the priority for each task. The first enabled row with an enabled account is the primary model. Later rows are fallback models. The app logs each attempt. It retries temporary errors, then tries the next model. A disabled row or account is skipped.
+Add a row for each task and AI Model in AI Task Models. Row order sets the priority for each task. The first enabled row with an enabled AI Model and an enabled account is the primary model. Later rows are fallback models. The app logs each attempt. It retries temporary errors, then tries the next model. A disabled row, AI Model or account is skipped.
 
-When a task has no rows, the app uses the legacy Model and OpenRouter API Key fields. When a task has rows but none can run, the call fails. The upgrade copies an existing OpenRouter key to an OpenRouter account and keeps the legacy fields. Add task rows to use the new account.
+When a task has no enabled row with an enabled AI Model and an enabled account, the call fails. The error tells you to add an AI Model row for the task in Document Extraction Settings > AI Task Models. The upgrade copies an old OpenRouter key from Document Extraction Settings to the OpenRouter account. When the settings have no task rows and an old model is set, the upgrade creates an AI Model for that model on the OpenRouter account and adds one row for each task. When no OpenRouter account exists, it prints a message and adds no rows.
+
+The upgrade also moves the API key of each existing AI Model to an AI Provider Account. It uses an account with the same provider and key when one exists. Otherwise it creates one. When the provider is not clear (OpenAI or Custom without an OpenRouter key or URL), the new account is disabled and its Last Error tells you what to check. The upgrade then creates one AI Model for each account and model pair in AI Task Models and on verifiers, and links the rows to it.
 
 ### AI prompts
 

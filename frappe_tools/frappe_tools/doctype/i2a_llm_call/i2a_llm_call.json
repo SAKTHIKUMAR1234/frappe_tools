@@ -61,7 +61,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Purpose",
-   "options": "route\nextract\nverify\nrepair"
+   "options": "route\nextract\nverify\nrepair\nsom_select\ncrop_check\nmatch\nagent\nask_document"
   },
   {
    "fieldname": "column_break_head",

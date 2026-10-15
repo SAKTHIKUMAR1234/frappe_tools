@@ -1,11 +1,19 @@
 """Anthropic Messages with native JSON schema output."""
 
+import json
 import re
 
 import frappe
 from requests import Response
 
-from frappe_tools.ai.providers import ProviderError, error_message, token_usage
+from frappe_tools.ai.providers import (
+	ProviderError,
+	chat_parts,
+	chat_reply,
+	error_message,
+	split_system,
+	token_usage,
+)
 
 BASE_URL = "https://api.anthropic.com"
 CLAUDE_CODE_VERSION = "2.1.280"
@@ -29,7 +37,7 @@ def build_turn(
 	"""Build one Messages turn; `final` forbids further tool calls."""
 	body = {
 		"model": model,
-		"system": [{"type": "text", "text": system + "\nReturn only JSON."}],
+		"system": [{"type": "text", "text": system + ("\nReturn only JSON." if options.get("json_mode", True) else "")}],
 		"messages": list(messages),
 		"temperature": options["temperature"],
 		"max_tokens": options["max_tokens"],
@@ -93,3 +101,43 @@ def continuation(result: dict, outputs: list[tuple[dict, str]]) -> list[dict]:
 	"""Return the assistant content and one user message with all tool results."""
 	results = [{"type": "tool_result", "tool_use_id": call["id"], "content": text} for call, text in outputs]
 	return [{"role": "assistant", "content": result["content"]}, {"role": "user", "content": results}]
+
+
+def chat_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+	"""Convert OpenAI chat `messages` to the system text and Messages turns; tool results join one user turn."""
+	system, turns = split_system(messages)
+	converted = []
+	for message in turns:
+		role, content = _chat_turn(message)
+		if converted and converted[-1]["role"] == role:
+			converted[-1]["content"].extend(content)
+		else:
+			converted.append({"role": role, "content": content})
+	return system, converted
+
+
+def _chat_turn(message):
+	if message["role"] == "tool":
+		return "user", [{"type": "tool_result", "tool_use_id": message["tool_call_id"], "content": message["content"]}]
+	if message["role"] == "assistant":
+		text = message.get("content") or ""
+		content = [{"type": "text", "text": text}] if text else []
+		content.extend(
+			{"type": "tool_use", "id": call["id"], "name": call["function"]["name"],
+				"input": json.loads(call["function"].get("arguments") or "{}")}
+			for call in message.get("tool_calls") or []
+		)
+		return "assistant", content
+	return "user", [_content_part(part) for part in chat_parts(message["content"])]
+
+
+def _content_part(part):
+	if part["type"] == "text":
+		return {"type": "text", "text": part["text"]}
+	if part["type"] == "image_url":
+		return _image(part["image_url"]["url"])
+	raise ValueError(frappe._("Anthropic cannot read {0} content").format(part["type"]))
+
+
+def assistant_message(result: dict, text: str) -> dict:
+	return chat_reply(text, tool_calls(result))

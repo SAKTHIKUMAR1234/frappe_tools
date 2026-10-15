@@ -6,6 +6,7 @@ frappe.ui.form.on("Scanned Document AI Verifier", {
 		frm.set_query("reference_doctype", () => ({
 			filters: { istable: 0, issingle: 0, is_virtual: 0 },
 		}));
+		frm.set_query("ai_model", () => ({ filters: { enabled: 1 } }));
 	},
 
 	refresh(frm) {
@@ -21,7 +22,7 @@ frappe.ui.form.on("Scanned Document AI Verifier", {
 		listen_for_progress(frm);
 		show_progress(frm, frm.doc);
 		const active = ["Queued", "Running"].includes(frm.doc.status);
-		for (const field of ["reference_doctype", "prompt", "max_documents", "ai_account", "model"]) {
+		for (const field of ["reference_doctype", "prompt", "max_documents", "ai_model"]) {
 			frm.set_df_property(field, "read_only", active);
 		}
 		if (active) frm.disable_save();

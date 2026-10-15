@@ -31,17 +31,13 @@ class TestClient(FrappeTestCase):
 		self.settings.update(
 			dict(
 				enable=1,
-				model="local-legacy-model",
 				max_attempts=2,
 				request_timeout=5,
-				max_tokens=100,
-				temperature=0.25,
 				task_models=[],
 			)
 		)
 		self.ensure_ready = llm.ensure_ready
 		self.enterContext(patch.object(llm, "ensure_ready", return_value=self.settings))
-		self.enterContext(patch.object(self.settings, "get_api_key", return_value="local-legacy-secret"))
 		self.sleep = self.enterContext(patch.object(client.time, "sleep"))
 		self.post = self.enterContext(patch("requests.post", return_value=self.success()))
 
@@ -56,11 +52,21 @@ class TestClient(FrappeTestCase):
 			}
 		)
 
-	def row(self, model, **kwargs):
-		self.settings.append(
-			"task_models",
-			dict(task="Scan Decision", account=self.account.name, model=model, enabled=1, **kwargs),
-		)
+	def model(self, model_id, account=None, **kwargs):
+		return frappe.get_doc(
+			dict(
+				doctype="AI Model",
+				model_label=f"{self.prefix} {model_id}",
+				account=account or self.account.name,
+				model_id=model_id,
+				**kwargs,
+			)
+		).insert()
+
+	def row(self, model_id, account=None, row_enabled=1, **model_fields):
+		model = self.model(model_id, account, **model_fields)
+		self.settings.append("task_models", dict(task="Scan Decision", ai_model=model.name, enabled=row_enabled))
+		return model
 
 	def call(self, **kwargs):
 		return client.call_model("Scan Decision", "Extract", "Quantity", run_id=self.prefix, **kwargs)
@@ -70,11 +76,12 @@ class TestClient(FrappeTestCase):
 			"Document AI Call Log", filters={"run_id": self.prefix}, fields=["*"], order_by="creation asc"
 		)
 
-	def test_legacy_fallback_and_wrapper(self):
+	def test_wrapper_uses_the_task_row(self):
+		self.row("row-model", max_tokens=100)
 		result = llm.call_vision(
 			[IMAGE], "Extract", "Quantity", task="Scan Decision", run_id=self.prefix, min_output_tokens=16000
 		)
-		self.assertEqual(result["model"], "OpenRouter/local-legacy-model")
+		self.assertEqual(result["model"], "OpenRouter/row-model")
 		self.assertEqual(result["data"], {"quantity": 12})
 		self.assertEqual(self.post.call_args.kwargs["json"]["max_tokens"], 16000)
 		self.assertEqual(self.logs()[0].cost_usd, 0.03)
@@ -88,6 +95,27 @@ class TestClient(FrappeTestCase):
 			[c.kwargs["json"]["model"] for c in self.post.call_args_list], ["first", "first", "second"]
 		)
 		self.assertEqual([log.status for log in self.logs()], ["Error", "Error", "Success"])
+
+	def test_ai_model_sets_temperature_and_tokens_above_the_task_floor(self):
+		self.row("chosen", max_tokens=2000, temperature=0.4)
+		self.call()
+		body = self.post.call_args.kwargs["json"]
+		self.assertEqual((body["max_tokens"], body["temperature"]), (2000, 0.4))
+		self.call(min_output_tokens=16000)
+		self.assertEqual(self.post.call_args.kwargs["json"]["max_tokens"], 16000)
+
+	def test_chosen_ai_model_first_then_task_rows(self):
+		self.row("row-model")
+		chosen = self.model("chosen-model")
+		self.post.side_effect = [response(status=400), self.success()]
+		self.assertEqual(self.call(ai_model=chosen.name)["model"], "OpenRouter/row-model")
+		self.assertEqual([c.kwargs["json"]["model"] for c in self.post.call_args_list], ["chosen-model", "row-model"])
+
+	def test_disabled_chosen_ai_model_is_skipped(self):
+		self.row("row-model")
+		chosen = self.model("chosen-model", enabled=0)
+		self.assertEqual(self.call(ai_model=chosen.name)["model"], "OpenRouter/row-model")
+		self.assertEqual(self.post.call_count, 1)
 
 	def test_deadline_bounds_requests_and_stops_fallback(self):
 		self.row("first")
@@ -207,24 +235,23 @@ class TestClient(FrappeTestCase):
 			self.assertEqual(self.post.call_count, 2)
 		self.sleep.assert_not_called()
 
-	def test_disabled_rows_and_accounts_skipped(self):
-		self.row("disabled-row")
-		self.settings.task_models[-1].enabled = 0
+	def test_disabled_rows_models_and_accounts_skipped(self):
+		self.row("disabled-row", row_enabled=0)
+		self.row("disabled-model", enabled=0)
 		other = frappe.copy_doc(self.account)
 		other.account_name = self.prefix + "-disabled"
 		other.enabled = 0
 		other.insert()
-		self.row("disabled-account")
-		self.settings.task_models[-1].account = other.name
+		self.row("disabled-account", other.name)
 		self.row("enabled")
 		self.assertEqual(self.call()["model"], "OpenRouter/enabled")
 		self.assertEqual(self.post.call_count, 1)
 
-	def test_disabled_task_does_not_use_legacy(self):
-		self.row("disabled")
-		self.settings.task_models[0].enabled = 0
-		with self.assertRaises(frappe.ValidationError):
-			self.call()
+	def test_task_without_a_usable_row_asks_for_an_ai_task_model(self):
+		for setup in (lambda: None, lambda: self.row("disabled", row_enabled=0)):
+			setup()
+			with self.assertRaisesRegex(frappe.ValidationError, "Add an AI Model row for this task"):
+				self.call()
 		self.post.assert_not_called()
 
 	def test_bad_json_and_timeout_retry(self):
@@ -344,16 +371,12 @@ class TestClient(FrappeTestCase):
 					self.assertIn("Provider failed <redacted>", log.response_payload)
 					self.assertFalse("local-only-access" in log.response_payload + log.error_message + message)
 
-	def test_schema_and_no_legacy_key_required_for_routes(self):
-		self.settings.get_api_key.return_value = None
+	def test_schema_is_sent(self):
 		self.row("chosen")
 		self.call(schema=SCHEMA)
 		self.assertEqual(
 			self.post.call_args.kwargs["json"]["response_format"]["json_schema"]["schema"], SCHEMA
 		)
-		self.settings.task_models = []
-		with self.assertRaisesRegex(frappe.ValidationError, "OpenRouter API Key"):
-			self.call()
 
 	def test_enable_still_required(self):
 		with (
@@ -420,8 +443,7 @@ class TestClient(FrappeTestCase):
 		).insert()
 		secret_tokens = tokens("client")
 		_store_tokens(codex_account, secret_tokens)
-		self.row("codex-model")
-		self.settings.task_models[-1].account = codex_account.name
+		self.row("codex-model", codex_account.name)
 		self.post.side_effect = [
 			response(status=401),
 			response(

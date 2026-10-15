@@ -62,12 +62,12 @@ def grounded_world(mode="Manual", **action_overrides):
 	FRAPPE.seed(
 		"AI Model", "vision-a", model_label="vision-a", enabled=1, provider="OpenRouter",
 		model_id="google/gemini-2.5-flash", supports_vision=1, supports_json_mode=1,
-		max_tokens=8192, temperature=0, cost_per_m_input=0.1, cost_per_m_output=0.4, api_key="k",
+		max_tokens=8192, temperature=0, cost_per_m_input=0.1, cost_per_m_output=0.4, account="OpenRouter", is_usable=1,
 	)
 	FRAPPE.seed(
 		"AI Model", "qwen-v", model_label="qwen-v", enabled=1, provider="OpenRouter",
 		model_id="qwen/qwen2.5-vl-72b-instruct", supports_vision=1, supports_json_mode=1,
-		max_tokens=8192, temperature=0, cost_per_m_input=0.05, cost_per_m_output=0.2, api_key="k",
+		max_tokens=8192, temperature=0, cost_per_m_input=0.05, cost_per_m_output=0.2, account="OpenRouter", is_usable=1,
 	)
 	action = dict(
 		action_name="LR Extraction", enabled=1, mode=mode,

@@ -5,8 +5,7 @@
  "engine": "InnoDB",
  "field_order": [
   "task",
-  "account",
-  "model",
+  "ai_model",
   "enabled"
  ],
  "fields": [
@@ -19,17 +18,10 @@
    "in_list_view": 1
   },
   {
-   "fieldname": "account",
+   "fieldname": "ai_model",
    "fieldtype": "Link",
-   "label": "Account",
-   "options": "AI Provider Account",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "model",
-   "fieldtype": "Data",
-   "label": "Model",
+   "label": "AI Model",
+   "options": "AI Model",
    "reqd": 1,
    "in_list_view": 1
   },

@@ -176,16 +176,15 @@ class TestAccounts(FrappeTestCase):
 	def test_patch_idempotence_does_not_replace_account(self):
 		with (
 			patch.object(frappe.db, "exists", return_value=True),
-			patch.object(frappe, "get_single") as settings,
+			patch.object(create_openrouter_account, "get_decrypted_password") as password,
 		):
 			create_openrouter_account.execute()
-			settings.assert_not_called()
+			password.assert_not_called()
 		with (
 			patch.object(frappe.db, "exists", side_effect=[False, True]),
-			patch.object(frappe, "get_single") as settings,
+			patch.object(create_openrouter_account, "get_decrypted_password", return_value="local-only-patch-key"),
 			patch.object(frappe, "get_doc") as doc,
 		):
-			settings.return_value.get_password.return_value = "local-only-patch-key"
 			create_openrouter_account.execute()
 			create_openrouter_account.execute()
 			self.assertEqual(doc.call_count, 1)

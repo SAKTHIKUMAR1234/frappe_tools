@@ -8,13 +8,10 @@
  "field_order": [
   "model_label",
   "enabled",
+  "account",
   "provider",
-  "model_id",
   "column_break_main",
-  "auth_type",
-  "api_key",
-  "api_secret",
-  "base_url",
+  "model_id",
   "capabilities_section",
   "supports_vision",
   "supports_json_mode",
@@ -43,50 +40,35 @@
    "label": "Enabled"
   },
   {
-   "default": "OpenRouter",
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "label": "Account",
+   "options": "AI Provider Account",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "The AI Provider Account that holds the login or API key for this model."
+  },
+  {
    "fieldname": "provider",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Provider",
-   "options": "OpenRouter\nAnthropic\nOpenAI\nCustom",
-   "reqd": 1
-  },
-  {
-   "description": "Provider's model identifier, e.g. google/gemini-2.5-flash",
-   "fieldname": "model_id",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Model ID",
-   "reqd": 1
+   "options": "OpenRouter\nOpenAI Codex\nAnthropic",
+   "fetch_from": "account.provider",
+   "read_only": 1,
+   "description": "Set by the account."
   },
   {
    "fieldname": "column_break_main",
    "fieldtype": "Column Break"
   },
   {
-   "default": "API Key",
-   "description": "How this model is authenticated — defines which credential fields apply.",
-   "fieldname": "auth_type",
-   "fieldtype": "Select",
-   "label": "Auth Type",
-   "options": "API Key\nAPI Key + Secret\nToken"
-  },
-  {
-   "fieldname": "api_key",
-   "fieldtype": "Password",
-   "label": "API Key / Token"
-  },
-  {
-   "depends_on": "eval:doc.auth_type=='API Key + Secret'",
-   "fieldname": "api_secret",
-   "fieldtype": "Password",
-   "label": "API Secret"
-  },
-  {
-   "description": "Optional endpoint override. Leave empty for the provider default.",
-   "fieldname": "base_url",
+   "description": "Model ID at the provider, for example google/gemini-2.5-flash or gpt-5.6-luna.",
+   "fieldname": "model_id",
    "fieldtype": "Data",
-   "label": "Base URL"
+   "in_list_view": 1,
+   "label": "Model ID",
+   "reqd": 1
   },
   {
    "fieldname": "capabilities_section",
@@ -150,7 +132,7 @@
   }
  ],
  "links": [],
- "modified": "2026-07-03 10:00:00.000000",
+ "modified": "2026-10-14 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "AI Model",

@@ -90,8 +90,6 @@ def _validate_options(doc):
 		frappe.throw(_("Choose a regular document DocType."))
 	if is_denied_doctype(meta):
 		frappe.throw(_("AI cannot read {0} documents.").format(doc.reference_doctype))
-	if bool(doc.get("ai_account")) != bool(doc.get("model")):
-		frappe.throw(_("Set both AI Account and Model, or leave both blank."))
 
 
 def _parse_filters(value):
@@ -195,7 +193,7 @@ def _run_batch(doc):
 		pluck="name", limit=cint(doc.max_documents), order_by="creation asc")
 	try:
 		columns = decide_columns(doc.reference_doctype, doc.prompt,
-			reference_name=doc.name, run_id=doc.last_run_id, route=_route(doc))
+			reference_name=doc.name, run_id=doc.last_run_id, ai_model=doc.ai_model)
 	finally:
 		frappe.db.commit()
 	_update(doc, total_documents=len(names), columns=frappe.as_json(columns))
@@ -239,13 +237,9 @@ def build_excel(name: str) -> str:
 	return file.file_url
 
 
-def _route(doc):
-	return (doc.get("ai_account"), doc.get("model")) if doc.get("ai_account") else None
-
-
 def decide_columns(
 	reference_doctype: str, prompt: str, *, reference_name: str | None = None,
-	run_id: str | None = None, route: tuple[str, str] | None = None,
+	run_id: str | None = None, ai_model: str | None = None,
 ) -> list[dict[str, str]]:
 	response = call_model(
 		"Verifier",
@@ -253,7 +247,7 @@ def decide_columns(
 		"Use unique keys. Do not include Document, Scanned Document(s), Status or Remarks columns.",
 		frappe.as_json({"prompt": prompt, "fields": _field_labels(reference_doctype)}),
 		target_doctype=reference_doctype, phase="Verifier Columns",
-		reference_doctype=DOCTYPE, reference_name=reference_name, run_id=run_id, route=route,
+		reference_doctype=DOCTYPE, reference_name=reference_name, run_id=run_id, ai_model=ai_model,
 	)["data"]
 	columns = [dict(column) for column in FIXED_COLUMNS]
 	seen = {column["key"] for column in columns}
@@ -321,7 +315,7 @@ def _verify_document(verifier, row, columns, run_deadline=None):
 			"document": _trim_document(doc.as_dict(), doc.doctype),
 			"pages": pages,
 		}),
-		tools=READ_TOOLS, schema=_row_schema(value_columns), deadline=deadline, route=_route(verifier),
+		tools=READ_TOOLS, schema=_row_schema(value_columns), deadline=deadline, ai_model=verifier.ai_model,
 		target_doctype=verifier.reference_doctype, phase="Verifier Agent Step",
 		reference_doctype=DOCTYPE, reference_name=verifier.name, run_id=verifier.last_run_id,
 	)["data"]

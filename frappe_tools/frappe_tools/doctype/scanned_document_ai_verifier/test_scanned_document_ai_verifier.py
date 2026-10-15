@@ -216,7 +216,7 @@ class TestScannedDocumentAIVerifier(FrappeTestCase):
 		self.assertEqual(columns, self.columns)
 		task, _, prompt = self.vision.call_args.args
 		self.assertEqual(task, "Verifier")
-		self.assertIsNone(self.vision.call_args.kwargs["route"])
+		self.assertIsNone(self.vision.call_args.kwargs["ai_model"])
 		payload = json.loads(prompt)
 		self.assertEqual(payload["prompt"], self.doc.prompt)
 		self.assertEqual(payload["fields"][0]["label"], "Total Quantity")
@@ -305,7 +305,7 @@ class TestScannedDocumentAIVerifier(FrappeTestCase):
 			verifier.process_verifier(self.doc.name, "local-test@example.com", self.doc.last_run_id)
 		decide.assert_called_once_with(
 			"Purchase Invoice", self.doc.prompt, reference_name=self.doc.name, run_id=self.doc.last_run_id,
-			route=None,
+			ai_model=None,
 		)
 		self.assertEqual(self.doc.last_run_id, "local-run-token1")
 		for entry in self.vision.call_args_list:
@@ -314,7 +314,7 @@ class TestScannedDocumentAIVerifier(FrappeTestCase):
 			self.assertGreater(kwargs.pop("deadline"), 0)
 			self.assertEqual(kwargs.pop("schema"), verifier._row_schema(self.value_columns))
 			self.assertEqual(kwargs, {
-				"target_doctype": "Purchase Invoice", "phase": "Verifier Agent Step", "route": None,
+				"target_doctype": "Purchase Invoice", "phase": "Verifier Agent Step", "ai_model": None,
 				"reference_doctype": verifier.DOCTYPE, "reference_name": self.doc.name,
 				"run_id": self.doc.last_run_id,
 			})
@@ -609,23 +609,15 @@ class TestScannedDocumentAIVerifier(FrappeTestCase):
 				verifier.ScannedDocumentAIVerifier.onload(self.doc)
 				self.doc.set_onload.assert_called_once_with("can_run", can_run)
 
-	def test_model_choice_is_the_first_route_for_columns_and_rows(self):
-		self.doc.update(ai_account="local-account", model="local-model")
+	def test_chosen_ai_model_is_the_first_route_for_columns_and_rows(self):
+		self.doc.update(ai_model="local-model")
 		self.vision.return_value = {"data": {"columns": self.value_columns}}
-		verifier.decide_columns("Purchase Invoice", self.doc.prompt, route=verifier._route(self.doc))
-		self.assertEqual(self.vision.call_args.kwargs["route"], ("local-account", "local-model"))
+		verifier.decide_columns("Purchase Invoice", self.doc.prompt, ai_model=self.doc.ai_model)
+		self.assertEqual(self.vision.call_args.kwargs["ai_model"], "local-model")
 		self.get_all.return_value = ["SCAN-1"]
 		self.vision.return_value = {"data": {"values": {"total_qty": 12}, "remarks": ""}}
 		verifier._document_row(self.doc, "PI-1", self.columns)
-		self.assertEqual(self.vision.call_args.kwargs["route"], ("local-account", "local-model"))
-
-	def test_model_choice_needs_account_and_model(self):
-		for account, model in (("local-account", None), (None, "local-model")):
-			with self.subTest(account=account, model=model):
-				self.doc.update(status="Completed", ai_account=account, model=model)
-				with self.assertRaises(frappe.ValidationError):
-					verifier.run_verifier(self.doc.name)
-		self.enqueue.assert_not_called()
+		self.assertEqual(self.vision.call_args.kwargs["ai_model"], "local-model")
 
 	def test_row_schema_is_strict_and_requires_every_column(self):
 		schema = verifier._row_schema(self.value_columns)

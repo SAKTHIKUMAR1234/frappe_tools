@@ -57,9 +57,8 @@ class TestAgent(FrappeTestCase):
 		self.prefix = "LOCAL-AGENT-" + frappe.generate_hash(length=10)
 		self.account = self.new_account("OpenRouter", "API Key")
 		self.settings = frappe.get_single("Document Extraction Settings")
-		self.settings.update(dict(enable=1, model="legacy", max_attempts=1, request_timeout=30, max_tokens=100,
-			temperature=0, task_models=[]))
-		self.settings.append("task_models", dict(task="Verifier", account=self.account.name, model="row-model", enabled=1))
+		self.settings.update(dict(enable=1, max_attempts=1, request_timeout=30, task_models=[]))
+		self.settings.append("task_models", dict(task="Verifier", ai_model=self.new_model(self.account, "row-model"), enabled=1))
 		self.enterContext(patch.object(llm, "ensure_ready", return_value=self.settings))
 		self.enterContext(patch.object(client.time, "sleep"))
 		self.post = self.enterContext(patch("requests.post"))
@@ -72,6 +71,10 @@ class TestAgent(FrappeTestCase):
 	def new_account(self, provider, auth_type, suffix=""):
 		return frappe.get_doc(dict(doctype="AI Provider Account", account_name=self.prefix + suffix, provider=provider,
 			auth_type=auth_type, api_key=SECRET, enabled=1)).insert()
+
+	def new_model(self, account, model_id):
+		return frappe.get_doc(dict(doctype="AI Model", model_label=f"{account.name} {model_id}", account=account.name,
+			model_id=model_id)).insert().name
 
 	def call(self, **kwargs):
 		kwargs.setdefault("deadline", time.monotonic() + 60)
@@ -154,7 +157,8 @@ class TestAgent(FrappeTestCase):
 		run = agent.AgentRun(self.tools, [], time.monotonic() + 60, max_tool_calls=0)
 		self.post.return_value = openrouter_turn([{"text": "again"}])
 		outcome = run.run_route(self.account, "row-model", ("Verify", "Document", SCHEMA),
-			client.task_options(self.settings), dict.fromkeys(CONTEXT_KEYS))
+			client.route_options(client.task_options(self.settings), frappe._dict(max_tokens=100, temperature=0)),
+			dict.fromkeys(CONTEXT_KEYS))
 		self.assertFalse(outcome["ok"])
 		self.assertIn("after the limit", outcome["error"])
 		self.echo.assert_not_called()
@@ -179,18 +183,18 @@ class TestAgent(FrappeTestCase):
 	def test_model_override_first_then_task_rows(self):
 		chosen = self.new_account("OpenRouter", "API Key", "-chosen")
 		self.post.side_effect = [response(status=400), openrouter_turn(content=FINAL)]
-		self.call(route=(chosen.name, "chosen-model"))
+		self.call(ai_model=self.new_model(chosen, "chosen-model"))
 		self.assertEqual([body["model"] for body in self.bodies()], ["chosen-model", "row-model"])
 		self.post.reset_mock()
 		self.post.side_effect = [openrouter_turn(content=FINAL)]
 		self.call()
 		self.assertEqual([body["model"] for body in self.bodies()], ["row-model"])
 
-	def test_model_override_without_task_rows_does_not_use_legacy(self):
+	def test_model_override_without_task_rows_tries_only_the_override(self):
 		self.settings.task_models = []
 		self.post.return_value = response(status=400)
 		with self.assertRaises(frappe.ValidationError):
-			self.call(route=(self.account.name, "chosen-model"))
+			self.call(ai_model=self.new_model(self.account, "chosen-model"))
 		self.assertEqual([body["model"] for body in self.bodies()], ["chosen-model"])
 
 	def test_tool_errors_unknown_tools_and_bad_arguments_go_back_to_the_model(self):

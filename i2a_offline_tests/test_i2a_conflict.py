@@ -189,7 +189,7 @@ def setup_world(mode="Manual"):
 	FRAPPE.reset()
 	FRAPPE.seed("AI Model", "vision-a", model_label="vision-a", enabled=1, provider="OpenRouter",
 		model_id="google/gemini-2.5-flash", supports_vision=1, supports_json_mode=1,
-		max_tokens=8192, temperature=0, cost_per_m_input=0.1, cost_per_m_output=0.4, api_key="k")
+		max_tokens=8192, temperature=0, cost_per_m_input=0.1, cost_per_m_output=0.4, account="OpenRouter", is_usable=1)
 	models_rows = [fake_frappe.FakeRow({"ai_model": "vision-a", "remarks": "vision — extract",
 		"is_orchestrator": 1, "is_verifier": 0})]
 	FRAPPE.seed("I2A Action", "LR Extraction", action_name="LR Extraction", enabled=1, mode=mode,
