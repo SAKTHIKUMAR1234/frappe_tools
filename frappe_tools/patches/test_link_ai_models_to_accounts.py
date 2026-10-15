@@ -134,9 +134,7 @@ class TestLinkAIModelsToAccounts(UnitTestCase):
 
 	def test_legacy_settings_model_gets_one_row_per_task(self):
 		model_id = self.legacy_settings()
-		if not frappe.db.exists("AI Provider Account", "OpenRouter"):
-			frappe.get_doc(dict(doctype="AI Provider Account", account_name="OpenRouter", provider="OpenRouter",
-				auth_type="API Key", api_key=OPENROUTER_KEY, enabled=1)).insert()
+		self.openrouter_account()
 		patch_module.execute()
 		patch_module.execute()
 		rows = frappe.get_all("AI Task Model", filters={"parenttype": patch_module.SETTINGS},
@@ -153,13 +151,47 @@ class TestLinkAIModelsToAccounts(UnitTestCase):
 		self.assertFalse(frappe.db.count("AI Task Model", {"parenttype": patch_module.SETTINGS}))
 		self.assertIn("no OpenRouter account", str(self.print.call_args))
 
-	def legacy_settings(self):
-		"""Leave the settings with no task rows and an old model value; return the model."""
+	def test_legacy_settings_key_creates_the_openrouter_account(self):
+		model_id = self.legacy_settings(max_tokens="32768", temperature="0.2")
+		frappe.db.delete("AI Provider Account", {"name": "OpenRouter"})
+		set_encrypted_password(patch_module.SETTINGS, patch_module.SETTINGS, OPENROUTER_KEY, "openrouter_api_key")
+		patch_module.execute()
+		account = frappe.get_doc("AI Provider Account", "OpenRouter")
+		self.assertEqual((account.enabled, account.get_password("api_key")), (1, OPENROUTER_KEY))
+		model = frappe.db.get_value("AI Model", {"account": "OpenRouter", "model_id": model_id},
+			["max_tokens", "temperature"])
+		self.assertEqual(tuple(model), (32768, 0.2))
+
+	def test_legacy_settings_model_fills_only_tasks_without_a_row(self):
+		self.legacy_settings()
+		account = self.account("OpenAI Codex", "ChatGPT Login", key=None)
+		codex = frappe.get_doc(dict(doctype="AI Model", model_label=f"{self.prefix} luna", account=account.name,
+			model_id="local-luna", enabled=1)).insert()
+		frappe.get_doc(dict(doctype="AI Task Model", parent=patch_module.SETTINGS, parenttype=patch_module.SETTINGS,
+			parentfield="task_models", idx=1, task="Verifier", ai_model=codex.name, enabled=1)).db_insert()
+		self.openrouter_account()
+		patch_module.execute()
+		rows = frappe.get_all("AI Task Model", filters={"parenttype": patch_module.SETTINGS}, fields=["task", "ai_model"])
+		self.assertEqual(sorted(row.task for row in rows), sorted(TASKS))
+		self.assertEqual([row.ai_model for row in rows if row.task == "Verifier"], [codex.name])
+		self.assertNotIn(codex.name, [row.ai_model for row in rows if row.task != "Verifier"])
+
+	def openrouter_account(self):
+		if not frappe.db.exists("AI Provider Account", "OpenRouter"):
+			frappe.get_doc(dict(doctype="AI Provider Account", account_name="OpenRouter", provider="OpenRouter",
+				auth_type="API Key", api_key=OPENROUTER_KEY, enabled=1)).insert()
+
+	def legacy_settings(self, max_tokens=None, temperature=None):
+		"""Leave the settings with no task rows and old model values; return the model."""
 		model_id = f"local/{self.prefix}"
 		frappe.db.delete("AI Task Model", {"parenttype": patch_module.SETTINGS})
-		frappe.db.delete("Singles", {"doctype": patch_module.SETTINGS, "field": "model"})
-		frappe.db.sql("insert into `tabSingles` (doctype, field, value) values (%s, 'model', %s)",
-			(patch_module.SETTINGS, model_id))
+		values = {"model": model_id, "max_tokens": max_tokens, "temperature": temperature}
+		frappe.db.delete("Singles", {"doctype": patch_module.SETTINGS, "field": ("in", list(values))})
+		frappe.db.delete("__Auth", {"doctype": patch_module.SETTINGS, "fieldname": "openrouter_api_key"})
+		for field, value in values.items():
+			if value is not None:
+				frappe.db.sql("insert into `tabSingles` (doctype, field, value) values (%s, %s, %s)",
+					(patch_module.SETTINGS, field, value))
 		return model_id
 
 	def old_task_row(self, task, account):

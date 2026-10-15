@@ -1,5 +1,8 @@
 import frappe
+from frappe.utils import cint, flt
 from frappe.utils.password import get_decrypted_password
+
+from frappe_tools.patches import create_openrouter_account
 
 ACCOUNT = "AI Provider Account"
 MODEL = "AI Model"
@@ -35,27 +38,28 @@ def execute() -> None:
 
 
 def add_legacy_task_rows() -> None:
-	"""Add one enabled row per task for the old settings model when the settings have no task rows."""
-	if frappe.db.count("AI Task Model", {"parenttype": SETTINGS}):
+	"""Add an enabled row for the old settings model to each task that has no row, as the old fallback did."""
+	rows = frappe.get_all("AI Task Model", filters={"parenttype": SETTINGS}, fields=["task", "idx"])
+	tasks = frappe.get_meta("AI Task Model").get_field("task").options.split("\n")
+	missing = [task for task in tasks if task not in {row.task for row in rows}]
+	model_id = legacy_setting("model")
+	if not missing or not model_id:
 		return
-	model_id = legacy_model_id()
-	if not model_id:
-		return
+	create_openrouter_account.execute()
 	if not frappe.db.exists(ACCOUNT, "OpenRouter"):
 		print(f"{SETTINGS}: no OpenRouter account for the old model {model_id}. Add rows in AI Task Models.")
 		return
 
 	ai_model = get_or_create_model("OpenRouter", model_id)
-	tasks = frappe.get_meta("AI Task Model").get_field("task").options.split("\n")
-	for index, task in enumerate(tasks, start=1):
+	for index, task in enumerate(missing, start=max((row.idx for row in rows), default=0) + 1):
 		row = {"task": task, "ai_model": ai_model, "enabled": 1, "idx": index}
 		parent = {"parent": SETTINGS, "parenttype": SETTINGS, "parentfield": "task_models"}
 		frappe.get_doc({"doctype": "AI Task Model", **parent, **row}).db_insert()
 
 
-def legacy_model_id() -> str | None:
-	"""Return the old settings model; the field is no longer in the DocType, so read tabSingles."""
-	value = frappe.db.sql("select value from `tabSingles` where doctype = %s and field = 'model'", SETTINGS)
+def legacy_setting(field: str) -> str | None:
+	"""Return an old settings value; the field is no longer in the DocType, so read tabSingles."""
+	value = frappe.db.sql("select value from `tabSingles` where doctype = %s and field = %s", (SETTINGS, field))
 	return ((value[0][0] if value else None) or "").strip() or None
 
 
@@ -156,8 +160,8 @@ def get_or_create_model(account: str, model_id: str) -> str:
 				"model_id": model_id,
 				"supports_vision": 1,
 				"supports_json_mode": 1,
-				"max_tokens": 8192,
-				"temperature": 0,
+				"max_tokens": cint(legacy_setting("max_tokens")) or 8192,
+				"temperature": flt(legacy_setting("temperature")),
 			}
 		)
 		.insert(ignore_permissions=True)
