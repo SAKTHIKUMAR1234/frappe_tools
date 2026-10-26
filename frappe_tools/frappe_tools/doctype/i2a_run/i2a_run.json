@@ -1,6 +1,6 @@
 {
  "actions": [],
- "autoname": "format:I2A-RUN-{YYYY}-{#####}",
+ "autoname": "hash",
  "creation": "2026-07-03 10:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -162,7 +162,7 @@
   }
  ],
  "links": [],
- "modified": "2026-07-15 21:00:00.000000",
+ "modified": "2026-10-26 13:10:00.000000",
  "modified_by": "Administrator",
  "module": "Frappe Tools",
  "name": "I2A Run",
