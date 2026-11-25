@@ -2,7 +2,8 @@
 
 The call is OpenAI chat shaped. Its JSON text is signed (X-Hub-Signature-256) and sent as {"request": text}, so
 the signature holds however the outer body is encoded on its way. Genie reads text only: no images. With tools
-offered, Genie answers tool calls in the same shape as the other providers.
+offered, Genie answers tool calls in the same shape as the other providers. Genie is also a conversation agent: it
+takes a whole chat by hand-over (see frappe_tools.ai.conversation).
 """
 
 import hashlib
@@ -83,6 +84,14 @@ def build_turn(
 		"X-Hub-Signature-256": sign(account["api_key"], text),
 	}
 	return account["base_url"].rstrip("/") + "/provider", headers, body
+
+
+def hand_over_request(account: dict, route: str, payload: dict) -> tuple[str, dict, bytes]:
+	"""Build a signed hand-over of a whole conversation to <Base URL>/<route>; the raw body is signed."""
+	check_url(account.get("base_url"))
+	text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+	headers = {"Content-Type": "application/json", "X-Hub-Signature-256": sign(account["api_key"], text)}
+	return account["base_url"].rstrip("/") + "/" + route.lstrip("/"), headers, text.encode()
 
 
 def sign(secret: str, text: str) -> str:
