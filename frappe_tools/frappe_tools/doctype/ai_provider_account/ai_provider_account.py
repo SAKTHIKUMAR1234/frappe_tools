@@ -1,6 +1,8 @@
 import frappe
 from frappe.model.document import Document
 
+from frappe_tools.ai.providers import ProviderError, genie
+
 AUTH_TYPES = {
 	"OpenRouter": ("API Key",),
 	"OpenAI Codex": ("ChatGPT Login",),
@@ -22,8 +24,10 @@ class AIProviderAccount(Document):
 			self.validate_genie()
 
 	def validate_genie(self) -> None:
-		if not (self.base_url or "").startswith(("https://", "http://")):
-			frappe.throw(frappe._("Set Base URL to the Genie hooks device URL"))
+		try:
+			genie.check_url(self.base_url)
+		except ProviderError as error:
+			frappe.throw(str(error))
 		secret = self.get_password("api_key", raise_exception=False) or ""
 		if len(secret) < GENIE_SECRET_LENGTH:
 			frappe.throw(frappe._("The Genie secret must hold at least {0} characters").format(GENIE_SECRET_LENGTH))

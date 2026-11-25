@@ -244,9 +244,11 @@ class TestGenieProvider(UnitTestCase):
 		self.assertNotEqual(self.call(second)["id"], call["id"])
 
 	def test_wait_is_the_shorter_timeout_less_the_margin(self):
-		for account_timeout, request_timeout, wait in ((30, 60, 27), (None, 60, 47), (90, 20, 17), (2, 60, 1)):
-			with self.subTest(account_timeout=account_timeout, request_timeout=request_timeout):
-				account = {**self.account, "request_timeout": account_timeout}
+		cases = ((30, 60, None, 27), (None, 60, None, 47), (90, 20, None, 17), (2, 60, None, 1), (30, 60, 12.5, 9))
+		for account_timeout, request_timeout, time_left, wait in cases:
+			with self.subTest(account_timeout=account_timeout, request_timeout=request_timeout, time_left=time_left):
+				# credentials() puts the time left before the caller's deadline in "timeout".
+				account = {**self.account, "request_timeout": account_timeout, "timeout": time_left}
 				body = genie.build_turn(account, "genie", "S", [], None, {**self.options, "timeout": request_timeout})[2]
 				self.assertEqual(self.call(body)["timeout_s"], wait)
 
@@ -270,8 +272,13 @@ class TestGenieProvider(UnitTestCase):
 	def test_refuses_images_and_a_missing_url(self):
 		with self.assertRaises(ValueError):
 			genie.build_request(self.account, "genie", "S", "U", [IMAGE], None, self.options)
-		with self.assertRaises(ProviderError):
-			genie.build_request({**self.account, "base_url": ""}, "genie", "S", "U", [], None, self.options)
+		for url in ("", "http://genie.example.test", "ftp://127.0.0.1", "https://user:pw@genie.example.test"):
+			with self.subTest(url=url), self.assertRaises(ProviderError):
+				genie.build_request({**self.account, "base_url": url}, "genie", "S", "U", [], None, self.options)
+		for url in ("https://genie.example.test", "http://localhost:8796", "http://127.0.0.1:8796", "http://10.1.2.3",
+			"http://192.168.1.5:8796", "http://100.64.0.11:8796"):
+			with self.subTest(url=url):
+				genie.check_url(url)
 		with self.assertRaises(ValueError):
 			genie.chat_messages([{"role": "user", "content": [{"type": "image_url", "image_url": {"url": IMAGE}}]}])
 
@@ -319,7 +326,9 @@ class TestGenieProvider(UnitTestCase):
 			return frappe.get_doc({**values, **fields})
 
 		account().validate_genie()
-		for fields in (dict(base_url=""), dict(base_url="genie.example.test"), dict(api_key="short"), dict(request_timeout=-1)):
+		account(base_url="http://100.64.0.11:8796").validate_genie()
+		for fields in (dict(base_url=""), dict(base_url="genie.example.test"), dict(base_url="http://genie.example.test"),
+			dict(api_key="short"), dict(request_timeout=-1)):
 			with self.subTest(fields=fields), self.assertRaises(frappe.ValidationError):
 				account(**fields).validate_genie()
 
@@ -345,13 +354,25 @@ class TestGenieThroughTheClient(UnitTestCase):
 				return state, post, exc
 		return state, post, None
 
-	def test_success_returns_the_json_answer(self):
-		state, post, error = self.run_execute(response({"id": "c", "model": "genie", "content": '{"quantity": 12}', "finish_reason": "stop"}))
+	def test_success_returns_the_json_answer_and_its_usage(self):
+		usage = {"input_tokens": 900, "output_tokens": 40, "total_tokens": 940, "estimated": True}
+		state, post, error = self.run_execute(response(
+			{"id": "c", "model": "genie", "content": '{"quantity": 12}', "finish_reason": "stop", "usage": usage}))
 		self.assertIsNone(error)
 		self.assertEqual(state["data"], {"quantity": 12})
-		self.assertEqual(state["usage"]["total_tokens"], 0)
+		self.assertEqual(state["usage"], dict(prompt_tokens=900, completion_tokens=40, total_tokens=940, cost=0))
 		self.assertEqual(post.call_args.kwargs["timeout"], 60)
 		self.assertEqual(post.call_args.args[0], "http://127.0.0.1:8796/provider")
+
+	def test_wait_follows_the_time_left_before_the_deadline(self):
+		answer = response({"content": '{"quantity": 12}', "finish_reason": "stop"})
+		# An unsaved account goes through accounts.credentials, which adds the time left.
+		account = frappe.get_doc({"doctype": "AI Provider Account", "account_name": "LOCAL-genie", **self.account})
+		with patch("requests.post", return_value=answer) as post:
+			client.execute(account, "genie", self.build, self.options, client.new_state(), time.monotonic() + 20)
+		call = json.loads(post.call_args.kwargs["json"]["request"])
+		self.assertLessEqual(call["timeout_s"], 17)
+		self.assertLess(call["timeout_s"], post.call_args.kwargs["timeout"])
 
 	def test_errors_map_like_the_other_providers(self):
 		cases = {

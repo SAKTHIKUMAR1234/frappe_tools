@@ -7,9 +7,11 @@ offered, Genie answers tool calls in the same shape as the other providers.
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import time
 import uuid
+from urllib.parse import urlsplit
 
 import frappe
 from requests import Response
@@ -19,6 +21,23 @@ from frappe_tools.ai.providers import ProviderError, chat_parts, chat_reply, err
 DEFAULT_TIMEOUT = 50
 # The device answers this many seconds before the HTTP request would time out, so its own error arrives.
 ANSWER_MARGIN = 3
+# http is allowed only to these hosts, as Relay's Genie URL rule: loopback, private and CGNAT (Tailscale) addresses.
+CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def check_url(url: str | None) -> None:
+	"""Allow https, and http only to localhost or a loopback, private or 100.64.0.0/10 address."""
+	parts = urlsplit(url or "")
+	if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+		raise ProviderError(frappe._("Set Base URL to the Genie hooks device URL, http or https, without credentials"), 400)
+	if parts.scheme == "https" or parts.hostname == "localhost":
+		return
+	try:
+		address = ipaddress.ip_address(parts.hostname)
+	except ValueError:
+		address = None
+	if not address or not (address.is_loopback or address.is_private or address in CGNAT):
+		raise ProviderError(frappe._("The Genie Base URL must use https, except for a loopback, private or 100.64.0.0/10 address"), 400)
 
 
 def build_request(
@@ -38,8 +57,7 @@ def build_turn(
 	tools: list[dict] | None = None, final: bool = False,
 ) -> tuple:
 	"""Build one signed call; `final` forbids further tool calls."""
-	if not account.get("base_url"):
-		raise ProviderError(frappe._("Set the Genie hooks device URL as the account's Base URL"), 400)
+	check_url(account.get("base_url"))
 	call = {
 		"version": 1,
 		"id": uuid.uuid4().hex,
@@ -78,8 +96,10 @@ def response_format(schema: dict | None, options: dict) -> dict:
 
 
 def wait_seconds(account: dict, options: dict) -> int:
-	"""How long Genie may take: the account's timeout, within the request timeout, less the answer margin."""
-	limit = min(account.get("request_timeout") or DEFAULT_TIMEOUT, options["timeout"])
+	"""How long Genie may take: the account's timeout, within the request's timeout and the time left for it
+	(credentials carry what is left of the caller's deadline), less the answer margin."""
+	limits = (account.get("request_timeout") or DEFAULT_TIMEOUT, options["timeout"], account.get("timeout"))
+	limit = min(limit for limit in limits if limit)
 	return max(int(limit) - ANSWER_MARGIN, 1)
 
 

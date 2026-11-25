@@ -21,7 +21,7 @@ EVENT = "ai_provider_login"
 
 
 def credentials(account: Document | dict, timeout: int = 120) -> dict:
-	"""Load credentials without exposing them to Desk."""
+	"""Load credentials without exposing them to Desk; `timeout` is the time left for the request."""
 	if isinstance(account, dict):
 		return account
 	if account.provider == "OpenAI Codex":
@@ -35,6 +35,7 @@ def credentials(account: Document | dict, timeout: int = 120) -> dict:
 		"base_url": account.base_url,
 		"api_key": key,
 		"request_timeout": account.get("request_timeout"),
+		"timeout": timeout,
 	}
 
 
