@@ -1,10 +1,14 @@
+import hashlib
+import hmac
 import json
-from unittest.mock import Mock
+import time
+from unittest.mock import Mock, patch
 
 import frappe
 from frappe.tests import UnitTestCase
 
-from frappe_tools.ai.providers import ProviderError, anthropic, codex, openrouter
+from frappe_tools.ai import client
+from frappe_tools.ai.providers import ProviderError, anthropic, codex, genie, openrouter
 
 SCHEMA = {
 	"type": "object",
@@ -207,3 +211,172 @@ class TestProviders(UnitTestCase):
 		self.assertEqual(message["tool_calls"][0]["function"], {"name": "f", "arguments": "{}"})
 		message = anthropic.assistant_message({"content": [{"type": "tool_use", "id": "c", "name": "f", "input": {"a": 1}}]}, "")
 		self.assertEqual(message["tool_calls"][0]["function"]["arguments"], '{"a": 1}')
+
+
+class TestGenieProvider(UnitTestCase):
+	"""The Genie hooks device as a provider: a signed call in, the playbook's reply mapped back."""
+
+	SECRET = "local-genie-secret-local-genie-secret"
+
+	def setUp(self):
+		self.account = dict(provider="Genie", auth_type="Shared Secret", api_key=self.SECRET,
+			base_url="http://127.0.0.1:8796/", request_timeout=30)
+		self.options = dict(temperature=0, max_tokens=1200, timeout=60)
+
+	def call(self, body: dict) -> dict:
+		return json.loads(body["request"])
+
+	def test_request_is_signed_over_the_call_text(self):
+		url, headers, body = genie.build_request(self.account, "genie", "Rules", "Hello", [], SCHEMA, self.options)
+		self.assertEqual(url, "http://127.0.0.1:8796/provider")
+		expected = "sha256=" + hmac.new(self.SECRET.encode(), body["request"].encode(), hashlib.sha256).hexdigest()
+		self.assertEqual(headers["X-Hub-Signature-256"], expected)
+		call = self.call(body)
+		self.assertEqual(headers["Idempotency-Key"], call["id"])
+		self.assertEqual(call["model"], "genie")
+		self.assertEqual(call["system"], "Rules")
+		self.assertEqual(call["messages"], [{"role": "user", "content": "Hello"}])
+		self.assertEqual(call["response_format"], {"type": "json_schema", "schema": SCHEMA})
+		self.assertEqual(call["max_tokens"], 1200)
+		self.assertLessEqual(abs(call["sent_at"] - time.time()), 5)
+		self.assertNotIn(self.SECRET, json.dumps([url, headers, body]))
+		second = genie.build_request(self.account, "genie", "Rules", "Hello", [], SCHEMA, self.options)[2]
+		self.assertNotEqual(self.call(second)["id"], call["id"])
+
+	def test_wait_is_the_shorter_timeout_less_the_margin(self):
+		for account_timeout, request_timeout, wait in ((30, 60, 27), (None, 60, 47), (90, 20, 17), (2, 60, 1)):
+			with self.subTest(account_timeout=account_timeout, request_timeout=request_timeout):
+				account = {**self.account, "request_timeout": account_timeout}
+				body = genie.build_turn(account, "genie", "S", [], None, {**self.options, "timeout": request_timeout})[2]
+				self.assertEqual(self.call(body)["timeout_s"], wait)
+
+	def test_response_format_follows_json_mode(self):
+		formats = {True: {"type": "json_object"}, False: {"type": "text"}}
+		for json_mode, expected in formats.items():
+			body = genie.build_turn(self.account, "genie", "S", [], None, {**self.options, "json_mode": json_mode})[2]
+			self.assertEqual(self.call(body)["response_format"], expected)
+
+	def test_tools_and_the_final_turn(self):
+		tools = [{"name": "SEARCH", "description": "Find", "parameters": {"type": "object"}}]
+		body = genie.build_turn(self.account, "genie", "S", [], SCHEMA, self.options, tools)[2]
+		self.assertEqual(body["tools"], ["SEARCH"])
+		self.assertEqual((self.call(body)["tools"], self.call(body)["tool_choice"]), (tools, "auto"))
+		final = genie.build_turn(self.account, "genie", "S", [], SCHEMA, self.options, tools, final=True)[2]
+		self.assertEqual(self.call(final)["tool_choice"], "none")
+		plain = genie.build_turn(self.account, "genie", "S", [], SCHEMA, self.options)[2]
+		self.assertNotIn("tools", plain)
+		self.assertNotIn("tools", self.call(plain))
+
+	def test_refuses_images_and_a_missing_url(self):
+		with self.assertRaises(ValueError):
+			genie.build_request(self.account, "genie", "S", "U", [IMAGE], None, self.options)
+		with self.assertRaises(ProviderError):
+			genie.build_request({**self.account, "base_url": ""}, "genie", "S", "U", [], None, self.options)
+		with self.assertRaises(ValueError):
+			genie.chat_messages([{"role": "user", "content": [{"type": "image_url", "image_url": {"url": IMAGE}}]}])
+
+	def test_answer_and_error_mapping(self):
+		text, usage, finish, raw = genie.parse_response(
+			response({"id": "c", "model": "genie", "content": '{"quantity":12}', "finish_reason": "stop"})
+		)
+		self.assertEqual(json.loads(text), {"quantity": 12})
+		self.assertEqual(usage, dict(prompt_tokens=0, completion_tokens=0, total_tokens=0, cost=0))
+		self.assertEqual((finish, genie.tool_calls(raw)), ("stop", []))
+		with self.assertRaises(ProviderError):
+			genie.parse_response(response({"error": {"code": "genie_failed", "message": "step_failed"}}))
+
+	def test_tool_calls_continue_in_chat_shape(self):
+		result = {"content": "", "finish_reason": "tool_calls",
+			"tool_calls": [{"id": "call_1", "name": "SEARCH", "arguments": {"q": "shirt"}}]}
+		self.assertEqual(genie.tool_calls(result), [{"id": "call_1", "name": "SEARCH", "arguments": {"q": "shirt"}}])
+		reply, output = genie.continuation(result, [(genie.tool_calls(result)[0], '{"rows": []}')])
+		self.assertEqual(reply["tool_calls"][0]["function"], {"name": "SEARCH", "arguments": '{"q": "shirt"}'})
+		self.assertEqual(output, {"role": "tool", "tool_call_id": "call_1", "content": '{"rows": []}'})
+		self.assertEqual(genie.assistant_message(result, "")["tool_calls"], reply["tool_calls"])
+
+	def test_chat_messages_keep_only_what_genie_reads(self):
+		messages = [
+			{"role": "system", "content": "Rules"},
+			{"role": "user", "content": [{"type": "text", "text": "Find"}], "name": "customer"},
+			{"role": "assistant", "content": None, "refusal": None, "tool_calls": [
+				{"id": "c", "type": "function", "function": {"name": "find", "arguments": "{}"}}]},
+			{"role": "tool", "tool_call_id": "c", "content": "found"},
+		]
+		system, turns = genie.chat_messages(messages)
+		self.assertEqual(system, "Rules")
+		self.assertEqual(turns, [
+			{"role": "user", "content": "Find"},
+			{"role": "assistant", "content": "", "tool_calls": [
+				{"id": "c", "type": "function", "function": {"name": "find", "arguments": "{}"}}]},
+			{"role": "tool", "content": "found", "tool_call_id": "c"},
+		])
+
+
+	def test_account_needs_a_url_and_a_long_secret(self):
+		def account(**fields):
+			values = dict(doctype="AI Provider Account", account_name="LOCAL-genie", provider="Genie",
+				auth_type="Shared Secret", api_key=self.SECRET, base_url="https://genie.example.test")
+			return frappe.get_doc({**values, **fields})
+
+		account().validate_genie()
+		for fields in (dict(base_url=""), dict(base_url="genie.example.test"), dict(api_key="short"), dict(request_timeout=-1)):
+			with self.subTest(fields=fields), self.assertRaises(frappe.ValidationError):
+				account(**fields).validate_genie()
+
+
+class TestGenieThroughTheClient(UnitTestCase):
+	"""client.execute and record_failure with a Genie account: success, usage and the error statuses."""
+
+	def setUp(self):
+		self.account = dict(provider="Genie", auth_type="Shared Secret", api_key="local-genie-secret-local-genie-secret",
+			base_url="http://127.0.0.1:8796", request_timeout=30)
+		self.options = dict(temperature=0, max_tokens=1200, timeout=60, attempts=1)
+
+	def build(self, adapter, credentials, model):
+		return adapter.build_request(credentials, model, "Rules", "Hello", [], SCHEMA, self.options)
+
+	def run_execute(self, answer: Mock):
+		state = client.new_state()
+		with patch("requests.post", return_value=answer) as post:
+			try:
+				client.execute(self.account, "genie", self.build, self.options, state)
+			except Exception as exc:
+				client.record_failure(state, exc)
+				return state, post, exc
+		return state, post, None
+
+	def test_success_returns_the_json_answer(self):
+		state, post, error = self.run_execute(response({"id": "c", "model": "genie", "content": '{"quantity": 12}', "finish_reason": "stop"}))
+		self.assertIsNone(error)
+		self.assertEqual(state["data"], {"quantity": 12})
+		self.assertEqual(state["usage"]["total_tokens"], 0)
+		self.assertEqual(post.call_args.kwargs["timeout"], 60)
+		self.assertEqual(post.call_args.args[0], "http://127.0.0.1:8796/provider")
+
+	def test_errors_map_like_the_other_providers(self):
+		cases = {
+			401: ("auth", "missing or bad X-Hub-Signature-256", False),
+			429: ("busy", "Genie is answering 4 calls; try again", True),
+			502: ("genie_failed", "Genie could not answer: step_failed", True),
+			504: ("timeout", "Genie timed out: no answer in 27 s", True),
+		}
+		for status, (code, message, retryable) in cases.items():
+			with self.subTest(status=status):
+				state, _post, error = self.run_execute(response({"error": {"code": code, "message": message}}, status))
+				self.assertIsInstance(error, ProviderError)
+				self.assertEqual(state["http_status"], status)
+				self.assertEqual(state["error"], message)
+				self.assertEqual(state["retryable"], retryable)
+		self.assertRegex(cases[504][1], r"timed?\s*out")
+
+	def test_a_tool_call_answer_is_not_a_json_error(self):
+		tools = [{"name": "SEARCH", "description": "Find", "parameters": {"type": "object"}}]
+
+		def build(adapter, credentials, model):
+			return adapter.build_turn(credentials, model, "Rules", [], SCHEMA, self.options, tools)
+
+		state = client.new_state()
+		answer = response({"content": "", "finish_reason": "tool_calls", "tool_calls": [{"id": "call_1", "name": "SEARCH", "arguments": {}}]})
+		with patch("requests.post", return_value=answer):
+			client.execute(self.account, "genie", build, self.options, state)
+		self.assertEqual(state["calls"], [{"id": "call_1", "name": "SEARCH", "arguments": {}}])

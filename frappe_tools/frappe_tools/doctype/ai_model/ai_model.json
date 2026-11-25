@@ -53,7 +53,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Provider",
-   "options": "OpenRouter\nOpenAI Codex\nAnthropic",
+   "options": "OpenRouter\nOpenAI Codex\nAnthropic\nGenie",
    "fetch_from": "account.provider",
    "read_only": 1,
    "description": "Set by the account."

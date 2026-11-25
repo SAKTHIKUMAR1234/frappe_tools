@@ -201,7 +201,7 @@ Enable Document Extraction in Document Extraction Settings. Every model is set u
 
 To set up a model:
 
-1. Create an AI Provider Account for OpenRouter, OpenAI Codex or Anthropic. A System Manager can do this. The account holds the login or the API key, and the optional Base URL.
+1. Create an AI Provider Account for OpenRouter, OpenAI Codex, Anthropic or Genie. A System Manager can do this. The account holds the login or the API key, and the optional Base URL.
 2. Create an AI Model. Select the Account. The Provider comes from the account. Enter the Model ID, for example google/gemini-2.5-flash or gpt-5.6-luna.
 3. Set Max Tokens and Temperature on the AI Model. Set Supports Vision when the model can read images. Supports JSON Mode controls the JSON response format for I2A.
 4. Select the AI Model in AI Task Models, on a verifier or in an I2A Action.
@@ -213,6 +213,8 @@ For OpenRouter, select API Key and enter the key. For OpenAI Codex, select ChatG
 For Anthropic, select API Key or Setup Token. Put the key or the setup token in API Key / Setup Token. A setup token starts with sk-ant-oat. Schema requests use native JSON output through output_config.format. This uses the same Messages API for both authentication types and needs no JSON output beta. It also avoids the forced tool restriction on some models. Select a model that supports structured output.
 
 Add a row for each task and AI Model in AI Task Models. Row order sets the priority for each task. The first enabled row with an enabled AI Model and an enabled account is the primary model. Later rows are fallback models. The app logs each attempt. It retries temporary errors, then tries the next model. A disabled row, AI Model or account is skipped.
+
+For Genie, select Shared Secret. Set Base URL to the Genie hooks device URL (the device serves `POST /provider`) and put the device's provider secret (at least 32 characters) in API Key / Setup Token / Secret. Request Timeout (s) is how long one call may take (default 50); a shorter time budget of the caller wins, and Genie answers 3 seconds before it with a "Genie timed out" error. Set the AI Model's Model ID to a model id that the device's mapping lists, for example `genie`. Genie runs each call as one wish of a Genie playbook. Each call is signed with HMAC-SHA256 and carries an idempotency key. Genie reads text only, so do not turn on Supports Vision. It returns the JSON that the schema asks for, and tool calls when the caller offers tools. It reports no token usage, so the log shows 0 tokens.
 
 When a task has no enabled row with an enabled AI Model and an enabled account, the call fails. The error tells you to add an AI Model row for the task in Document Extraction Settings > AI Task Models. The upgrade copies an old OpenRouter key from Document Extraction Settings to the OpenRouter account. When the settings have no task rows and an old model is set, the upgrade creates an AI Model for that model on the OpenRouter account and adds one row for each task. When no OpenRouter account exists, it prints a message and adds no rows.
 

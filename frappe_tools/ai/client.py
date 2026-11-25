@@ -8,11 +8,11 @@ from frappe.utils import cint, flt
 from rq.timeouts import JobTimeoutException
 
 from frappe_tools.ai import accounts
-from frappe_tools.ai.providers import ProviderError, anthropic, codex, error_message, openrouter
+from frappe_tools.ai.providers import ProviderError, anthropic, codex, error_message, genie, openrouter
 from frappe_tools.utils import llm
 
 TASKS = ("Document Extraction", "Page Classification", "Page Extraction", "Scan Decision", "Verifier")
-PROVIDERS = {"OpenRouter": openrouter, "OpenAI Codex": codex, "Anthropic": anthropic}
+PROVIDERS = {"OpenRouter": openrouter, "OpenAI Codex": codex, "Anthropic": anthropic, "Genie": genie}
 BODY_CHUNK_BYTES = 8192
 
 

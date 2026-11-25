@@ -5,7 +5,9 @@ AUTH_TYPES = {
 	"OpenRouter": ("API Key",),
 	"OpenAI Codex": ("ChatGPT Login",),
 	"Anthropic": ("API Key", "Setup Token"),
+	"Genie": ("Shared Secret",),
 }
+GENIE_SECRET_LENGTH = 32
 
 
 class AIProviderAccount(Document):
@@ -16,6 +18,17 @@ class AIProviderAccount(Document):
 			token = self.get_password("api_key", raise_exception=False) or ""
 			if token and not token.startswith("sk-ant-oat"):
 				frappe.throw(frappe._("Anthropic setup tokens must start with sk-ant-oat"))
+		if self.provider == "Genie":
+			self.validate_genie()
+
+	def validate_genie(self) -> None:
+		if not (self.base_url or "").startswith(("https://", "http://")):
+			frappe.throw(frappe._("Set Base URL to the Genie hooks device URL"))
+		secret = self.get_password("api_key", raise_exception=False) or ""
+		if len(secret) < GENIE_SECRET_LENGTH:
+			frappe.throw(frappe._("The Genie secret must hold at least {0} characters").format(GENIE_SECRET_LENGTH))
+		if (self.get("request_timeout") or 0) < 0:
+			frappe.throw(frappe._("Request Timeout cannot be negative"))
 
 
 def has_permission(doc: Document, ptype: str, user: str | None = None) -> bool:

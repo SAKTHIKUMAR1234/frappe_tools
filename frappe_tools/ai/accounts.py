@@ -34,6 +34,7 @@ def credentials(account: Document | dict, timeout: int = 120) -> dict:
 		"auth_type": account.auth_type,
 		"base_url": account.base_url,
 		"api_key": key,
+		"request_timeout": account.get("request_timeout"),
 	}
 
 
