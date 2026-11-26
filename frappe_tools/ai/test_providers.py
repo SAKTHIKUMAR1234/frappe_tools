@@ -17,6 +17,7 @@ SCHEMA = {
 	"additionalProperties": False,
 }
 IMAGE = "data:image/png;base64,bG9jYWw="
+AUDIO = {"data": "T2dnUw==", "format": "ogg"}
 
 
 def response(result: dict | None = None, status: int = 200, events: list | None = None) -> Mock:
@@ -159,6 +160,13 @@ class TestProviders(UnitTestCase):
 		self.assertEqual(json.loads(text), {"quantity": 12})
 		self.assertEqual(usage["total_tokens"], 16)
 		self.assertEqual(finish, "end_turn")
+
+	def test_audio_reaches_openrouter_and_other_providers_refuse_it(self):
+		content = openrouter.build_request(*self.args, audio=[AUDIO])[2]["messages"][1]["content"]
+		self.assertEqual(content[-1], {"type": "input_audio", "input_audio": AUDIO})
+		for adapter in (codex, anthropic, genie):
+			with self.subTest(adapter=adapter.__name__), self.assertRaisesRegex(ProviderError, "cannot read audio"):
+				adapter.build_request(*self.args, audio=[AUDIO])
 
 	def test_anthropic_bad_image(self):
 		args = list(self.args)

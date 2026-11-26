@@ -8,7 +8,7 @@ from frappe.tests import UnitTestCase
 from rq.timeouts import JobTimeoutException
 
 from frappe_tools.ai import client
-from frappe_tools.ai.test_providers import IMAGE, SCHEMA, response
+from frappe_tools.ai.test_providers import AUDIO, IMAGE, SCHEMA, response
 from frappe_tools.utils import llm
 
 
@@ -401,6 +401,32 @@ class TestClient(UnitTestCase):
 		self.assertFalse(secret in payload)
 		self.assertFalse(IMAGE in payload)
 		self.assertNotIn("Authorization", log.request_payload)
+
+	def test_audio_skips_a_provider_that_cannot_read_it_and_is_never_logged(self):
+		from frappe_tools.ai.accounts import _store_tokens
+		from frappe_tools.ai.test_accounts import tokens
+
+		codex_account = frappe.get_doc(
+			dict(
+				doctype="AI Provider Account",
+				account_name=self.prefix + "-codex",
+				provider="OpenAI Codex",
+				auth_type="ChatGPT Login",
+				enabled=1,
+			)
+		).insert()
+		_store_tokens(codex_account, tokens("client"))
+		self.row("codex-model", codex_account.name)
+		self.row("audio-model")
+		result = self.call(audio=[AUDIO])
+		self.assertEqual(result["model"], "OpenRouter/audio-model")
+		self.assertEqual(self.post.call_count, 1)
+		content = self.post.call_args.kwargs["json"]["messages"][1]["content"]
+		self.assertEqual(content[-1], {"type": "input_audio", "input_audio": AUDIO})
+		logs = self.logs()
+		self.assertEqual([log.status for log in logs], ["Error", "Success"])
+		self.assertIn("OpenAI Codex cannot read audio", logs[0].error_message)
+		self.assertFalse(AUDIO["data"] in logs[1].request_payload)
 
 	def test_all_image_shapes_and_embedded_secrets_redacted(self):
 		secret = "local-only-access"

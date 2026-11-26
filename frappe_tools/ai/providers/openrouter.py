@@ -9,14 +9,17 @@ BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def build_request(
-	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict
+	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict,
+	audio: list[dict] | None = None,
 ) -> tuple:
-	return build_turn(account, model, system, [user_message(user, images)], schema, options)
+	return build_turn(account, model, system, [user_message(user, images, audio)], schema, options)
 
 
-def user_message(user: str, images: list[str]) -> dict:
+def user_message(user: str, images: list[str], audio: list[dict] | None = None) -> dict:
+	"""Each `audio` item is {"data": base64 text, "format": "ogg", "mp3", "wav" or another format the model reads}."""
 	content = [{"type": "text", "text": user}]
 	content.extend({"type": "image_url", "image_url": {"url": url}} for url in images)
+	content.extend({"type": "input_audio", "input_audio": {"data": item["data"], "format": item["format"]}} for item in audio or [])
 	return {"role": "user", "content": content}
 
 

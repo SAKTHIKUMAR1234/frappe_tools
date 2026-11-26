@@ -11,6 +11,7 @@ from frappe_tools.ai.providers import (
 	chat_parts,
 	chat_reply,
 	error_message,
+	refuse_audio,
 	split_system,
 	token_usage,
 )
@@ -19,8 +20,10 @@ BASE_URL = "https://chatgpt.com/backend-api"
 
 
 def build_request(
-	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict
+	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict,
+	audio: list[dict] | None = None,
 ) -> tuple:
+	refuse_audio(audio, "OpenAI Codex")
 	return build_turn(account, model, system, [user_message(user, images)], schema, options)
 
 

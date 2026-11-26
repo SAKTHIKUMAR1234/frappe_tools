@@ -84,7 +84,7 @@ def log_call(
 
 
 def redact_secrets(value, secrets=None):
-	"""Redact credentials and image data recursively from log and error values."""
+	"""Redact credentials, image and audio data recursively from log and error values."""
 	if isinstance(value, dict):
 		return {
 			key: "<redacted>" if _sensitive(key, value) else redact_secrets(item, secrets)
@@ -112,7 +112,8 @@ def _sensitive(key, value):
 		"id_token",
 	}:
 		return True
-	return key == "data" and value.get("type") == "base64"
+	# Anthropic base64 sources and OpenRouter input_audio parts.
+	return key == "data" and (value.get("type") == "base64" or "format" in value)
 
 
 def safe_json_loads(text):

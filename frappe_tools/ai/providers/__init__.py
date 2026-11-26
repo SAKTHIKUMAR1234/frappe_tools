@@ -2,6 +2,8 @@
 
 import json
 
+import frappe
+
 
 class ProviderError(ValueError):
 	"""A provider rejected or failed a request."""
@@ -14,6 +16,12 @@ class ProviderError(ValueError):
 		self.raw_text = raw_text
 		self.finish_reason = finish_reason
 		self.usage = usage
+
+
+def refuse_audio(audio: list[dict] | None, provider: str) -> None:
+	"""Raise a ProviderError when a provider that reads no audio gets audio."""
+	if audio:
+		raise ProviderError(frappe._("{0} cannot read audio").format(provider))
 
 
 def error_message(result) -> str:

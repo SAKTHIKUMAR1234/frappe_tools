@@ -11,6 +11,7 @@ from frappe_tools.ai.providers import (
 	chat_parts,
 	chat_reply,
 	error_message,
+	refuse_audio,
 	split_system,
 	token_usage,
 )
@@ -21,8 +22,10 @@ OAUTH_BETAS = "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming
 
 
 def build_request(
-	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict
+	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict,
+	audio: list[dict] | None = None,
 ) -> tuple:
+	refuse_audio(audio, "Anthropic")
 	return build_turn(account, model, system, [user_message(user, images)], schema, options)
 
 

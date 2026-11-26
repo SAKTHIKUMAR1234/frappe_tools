@@ -26,6 +26,7 @@ def call_model(
 	user_prompt: str,
 	*,
 	images: list[str] | None = None,
+	audio: list[dict] | None = None,
 	schema: dict | None = None,
 	extraction=None,
 	target_doctype=None,
@@ -39,6 +40,7 @@ def call_model(
 ) -> dict:
 	"""Try the chosen `ai_model`, then the task models in priority order, and log each attempt.
 
+	`audio` items are {"data": base64 text, "format": "ogg", "mp3", ...}; a provider that reads no audio fails the route.
 	No request starts after `deadline` (time.monotonic()) and none runs past it.
 	"""
 	settings = task_settings(task)
@@ -57,7 +59,7 @@ def call_model(
 		model_options = route_options(options, model)
 
 		def build(adapter, credentials, model_id):
-			return adapter.build_request(credentials, model_id, *prompts, model_options)
+			return adapter.build_request(credentials, model_id, *prompts, model_options, audio=audio)
 
 		outcome = try_model(account, model.model_id, build, model_options, context, deadline)
 		if outcome.get("ok"):

@@ -17,7 +17,15 @@ from urllib.parse import urlsplit
 import frappe
 from requests import Response
 
-from frappe_tools.ai.providers import ProviderError, chat_parts, chat_reply, error_message, split_system, token_usage
+from frappe_tools.ai.providers import (
+	ProviderError,
+	chat_parts,
+	chat_reply,
+	error_message,
+	refuse_audio,
+	split_system,
+	token_usage,
+)
 
 DEFAULT_TIMEOUT = 50
 # The device answers this many seconds before the HTTP request would time out, so its own error arrives.
@@ -42,8 +50,10 @@ def check_url(url: str | None) -> None:
 
 
 def build_request(
-	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict
+	account: dict, model: str, system: str, user: str, images: list[str], schema: dict | None, options: dict,
+	audio: list[dict] | None = None,
 ) -> tuple:
+	refuse_audio(audio, "Genie")
 	return build_turn(account, model, system, [user_message(user, images)], schema, options)
 
 
